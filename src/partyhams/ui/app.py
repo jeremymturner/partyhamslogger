@@ -27,6 +27,52 @@ from partyhams.ui.main_window import MainWindow
 from partyhams.ui.radio_dialog import RadioDialog
 from partyhams.ui.style import apply_theme
 
+APP_NAME = "PartyHams Logger"
+
+
+def _set_macos_app_name(name: str) -> None:
+    """Set the macOS application menu title (the bold first menu).
+
+    Qt reads it from the running bundle's ``CFBundleName``; for an unbundled
+    Python process that's "Python". We override it via the Objective-C runtime
+    (no extra dependency) and it must happen *before* QApplication is created.
+    Best-effort: silently does nothing off macOS or if the runtime call fails.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        from ctypes import c_char_p, c_void_p, cdll, util
+
+        objc = cdll.LoadLibrary(util.find_library("objc"))
+        objc.objc_getClass.restype = c_void_p
+        objc.objc_getClass.argtypes = [c_char_p]
+        objc.sel_registerName.restype = c_void_p
+        objc.sel_registerName.argtypes = [c_char_p]
+
+        def send(receiver, selector, *args, argtypes=()):
+            objc.objc_msgSend.restype = c_void_p
+            objc.objc_msgSend.argtypes = [c_void_p, c_void_p, *argtypes]
+            return objc.objc_msgSend(receiver, objc.sel_registerName(selector), *args)
+
+        ns_string = objc.objc_getClass(b"NSString")
+
+        def nsstr(text: str):
+            return send(
+                ns_string, b"stringWithUTF8String:", text.encode("utf-8"), argtypes=[c_char_p]
+            )
+
+        bundle = send(objc.objc_getClass(b"NSBundle"), b"mainBundle")
+        info = send(bundle, b"infoDictionary")
+        send(
+            info,
+            b"setObject:forKey:",
+            nsstr(name),
+            nsstr("CFBundleName"),
+            argtypes=[c_void_p, c_void_p],
+        )
+    except Exception:  # noqa: BLE001 - cosmetic; never block startup
+        pass
+
 
 def _poller_from_radio(radio: dict | None) -> RadioPoller | None:
     """Build a RadioPoller from a saved radio choice, or None for manual."""
@@ -88,7 +134,9 @@ def run() -> int:
     """Launch the application. Returns the process exit code."""
     import qasync
 
+    _set_macos_app_name(APP_NAME)  # must precede QApplication construction
     app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
     apply_theme(app)
     app.setQuitOnLastWindowClosed(False)
     loop = qasync.QEventLoop(app)
