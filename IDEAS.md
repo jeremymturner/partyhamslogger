@@ -315,9 +315,12 @@ operator** · test gear = **Flex 6500, IC-705, IC-7610 (remote), FT-891** · bui
     the contest schema, shows live score + DUPE indicator, and lists the log
     (peer QSOs coloured). Field Day fully wired; **ADIF + Cabrillo export** done;
     first-run dialog done; offline *and* networked (multicast) modes.
-  - ⏳ **Remaining:** live CAT auto-fill of band/mode/freq (Hamlib first, then Flex
-    + Icom CI-V drivers), CW(CAT)+voice F-key macros, and on-the-air testing
-    across macOS/Windows/Linux.
+  - ✅ **Hamlib CAT auto-fill — DONE.** `rigctld` client validated against a fake
+    server; `RadioPoller` (`app/radio.py`) feeds live frequency/mode into the entry
+    window (band/mode follow the rig, freq readout, graceful reconnect). Verify with
+    your FT-891 via `make rig-spike`. Flex + Icom CI-V native drivers still to come.
+  - ⏳ **Remaining:** native FlexRadio + Icom CI-V drivers, CW(CAT)+voice F-key
+    macros, and on-the-air testing across macOS/Windows/Linux.
 - **Phase 2:** Module #2 (mult-heavy: CQ WW or WPX) to validate the multiplier engine,
   band map + DX cluster, rate meters, run/S&P macro sets, SO2R/SO2V, N1MM UDP interop.
 - **Phase 3:** Digital integration (WSJT-X/fldigi), QRZ/CTY lookups, awards tracking,

@@ -44,6 +44,17 @@ class StartDialog(QDialog):
         self._operator = QLineEdit()
         self._operator.setPlaceholderText("this operator (defaults to station call)")
 
+        # Radio / CAT control.
+        self._radio = QComboBox()
+        self._radio.addItem("None — manual band/mode", "none")
+        self._radio.addItem("Hamlib (rigctld)", "hamlib")
+        self._rig_conn = QLineEdit("127.0.0.1:4532")
+        self._rig_conn.setPlaceholderText("rigctld host:port")
+        self._rig_conn.setEnabled(False)
+        self._radio.currentIndexChanged.connect(
+            lambda _i: self._rig_conn.setEnabled(self._radio.currentData() == "hamlib")
+        )
+
         # Callsign/class/section/operator are upper case; network name is free-form.
         make_upper(self._call, self._class, self._section, self._operator)
 
@@ -54,6 +65,8 @@ class StartDialog(QDialog):
         form.addRow("Power", self._power)
         form.addRow("Operator", self._operator)
         form.addRow("Network name", self._network)
+        form.addRow("Radio", self._radio)
+        form.addRow("rigctld", self._rig_conn)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -70,6 +83,7 @@ class StartDialog(QDialog):
 
     def settings(self) -> dict:
         call = self._call.text().strip().upper()
+        host, _, port = self._rig_conn.text().strip().partition(":")
         return {
             "my_call": call,
             "operator": (self._operator.text().strip().upper() or call),
@@ -77,4 +91,7 @@ class StartDialog(QDialog):
             "section": self._section.text().strip().upper(),
             "power": _POWER_OPTIONS[self._power.currentIndex()][1],
             "network": self._network.text().strip(),
+            "radio": self._radio.currentData(),
+            "rig_host": host or "127.0.0.1",
+            "rig_port": int(port) if port.isdigit() else 4532,
         }

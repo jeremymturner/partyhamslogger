@@ -1,0 +1,75 @@
+"""HamlibRadio client against a fake rigctld (validates the rigctld protocol code)."""
+
+from __future__ import annotations
+
+from fake_rigctld import FakeRigctld
+
+from partyhams.core.models import Mode
+from partyhams.radio.hamlib import HamlibRadio
+
+
+async def test_read_state():
+    fake = FakeRigctld(freq=14_074_000, mode="CW")
+    host, port = await fake.start()
+    radio = HamlibRadio(host, port)
+    await radio.connect()
+
+    state = await radio.read_state()
+    assert state.freq_hz == 14_074_000
+    assert state.mode is Mode.CW
+
+    # Simulate the operator spinning the dial and changing mode.
+    fake.freq = 21_300_000
+    fake.mode = "USB"
+    state = await radio.read_state()
+    assert state.freq_hz == 21_300_000
+    assert state.mode is Mode.USB
+
+    await radio.disconnect()
+    await fake.stop()
+
+
+async def test_set_frequency_and_mode():
+    fake = FakeRigctld()
+    host, port = await fake.start()
+    radio = HamlibRadio(host, port)
+    await radio.connect()
+
+    await radio.set_frequency(7_030_000)
+    assert fake.freq == 7_030_000
+    await radio.set_mode(Mode.LSB)
+    assert fake.mode == "LSB"
+
+    await radio.disconnect()
+    await fake.stop()
+
+
+async def test_ptt_and_cw():
+    fake = FakeRigctld()
+    host, port = await fake.start()
+    radio = HamlibRadio(host, port)
+    await radio.connect()
+
+    await radio.set_ptt(True)
+    assert fake.ptt == "1"
+    await radio.send_cw("TEST DE W7ABC", wpm=28)
+    assert "TEST DE W7ABC" in fake.morse
+    assert fake.levels.get("KEYSPD") == "28"
+
+    await radio.disconnect()
+    await fake.stop()
+
+
+async def test_command_error_raises():
+    fake = FakeRigctld()
+    host, port = await fake.start()
+    radio = HamlibRadio(host, port)
+    await radio.connect()
+    # The fake returns RPRT -11 for unknown commands; force one through _command.
+    try:
+        await radio._command("ZZZ")
+        raise AssertionError("expected an error for an unsupported command")
+    except OSError:
+        pass
+    await radio.disconnect()
+    await fake.stop()

@@ -30,9 +30,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession
-from partyhams.core.models import Band, Mode, band_by_label
-from partyhams.ui.style import ACCENT, AMBER, DUPE, MULT, MULT_BG, PEER, TEXT
+from partyhams.core.models import Band, Mode, band_by_label, band_for_freq
+from partyhams.radio.base import RadioState
+from partyhams.ui.style import ACCENT, AMBER, DUPE, MULT, MULT_BG, PEER, TEXT, TEXT_DIM
 from partyhams.ui.widgets import make_upper
 
 # Modes offered in the entry row.
@@ -40,7 +42,12 @@ _ENTRY_MODES = [Mode.CW, Mode.USB, Mode.LSB, Mode.FM, Mode.RTTY, Mode.FT8]
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, session: LogSession, on_close: Callable[[], None] | None = None) -> None:
+    def __init__(
+        self,
+        session: LogSession,
+        on_close: Callable[[], None] | None = None,
+        radio_poller: RadioPoller | None = None,
+    ) -> None:
         super().__init__()
         self.session = session
         self._on_close = on_close
@@ -48,6 +55,15 @@ class MainWindow(QMainWindow):
             self._loop = asyncio.get_event_loop()
         except RuntimeError:
             self._loop = None  # no loop (e.g. tests) -> log locally, skip broadcast
+
+        # CAT state. When a radio poller is present, band/mode/frequency follow the
+        # rig and the manual combos become read-only mirrors.
+        self._poller = radio_poller
+        self._cat = radio_poller is not None
+        self._radio_freq: int | None = None
+        self._radio_mode: Mode | None = None
+        self._radio_connected = False
+
         self.setWindowTitle(f"PartyHams Logger — {session.config.my_call} — {session.contest.name}")
         self.resize(900, 560)
 
@@ -66,6 +82,17 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         session.add_listener(self.refresh)
+
+        if self._cat and self._poller is not None:
+            # The rig drives band/mode; show them but don't let them be edited.
+            self._band.setEnabled(False)
+            self._mode.setEnabled(False)
+            self._poller.on_state = self._on_radio_state
+            self._poller.on_status = self._on_radio_status
+            self._radio_connected = self._poller.connected
+            if self._poller.state is not None:
+                self._apply_radio_state(self._poller.state)
+
         self._call.setFocus()
         self.refresh()
 
@@ -128,6 +155,11 @@ class MainWindow(QMainWindow):
         hbox.addWidget(QLabel("Mode"))
         hbox.addWidget(self._mode)
 
+        # Frequency readout (live from CAT when a radio is connected).
+        self._freq = QLabel()
+        self._freq.setStyleSheet(f"color: {ACCENT}; font-weight: 600;")
+        hbox.addWidget(self._freq)
+
         # Status indicators: new-multiplier (green) and dupe (red).
         self._mult = QLabel()
         self._mult.setStyleSheet(f"font-weight: bold; color: {MULT};")
@@ -179,11 +211,59 @@ class MainWindow(QMainWindow):
         return self._band.currentData()
 
     def _current_freq(self) -> int:
+        if self._cat and self._radio_freq is not None:
+            return self._radio_freq
         band = self._current_band()
         return (band.low_hz + band.high_hz) // 2
 
     def _current_mode(self) -> Mode:
+        if self._cat and self._radio_mode is not None:
+            return self._radio_mode
         return self._mode.currentData()
+
+    # ------------------------------------------------------------------ #
+    # CAT (radio) integration
+    # ------------------------------------------------------------------ #
+    def _on_radio_state(self, state: RadioState) -> None:
+        self._apply_radio_state(state)
+
+    def _on_radio_status(self, connected: bool, error: str | None) -> None:
+        self._radio_connected = connected
+        if not connected:
+            self.statusBar().showMessage(
+                f"Radio disconnected{f' ({error})' if error else ''}", 3000
+            )
+        self._update_freq_readout()
+
+    def _apply_radio_state(self, state: RadioState) -> None:
+        self._radio_freq = state.freq_hz
+        self._radio_mode = state.mode
+        # Mirror onto the (disabled) combos for a familiar display.
+        band = band_for_freq(state.freq_hz)
+        if band is not None:
+            idx = self._band.findText(band.label)
+            if idx >= 0:
+                self._band.setCurrentIndex(idx)
+        mode_idx = self._mode.findData(state.mode)
+        if mode_idx >= 0:
+            self._mode.setCurrentIndex(mode_idx)
+        self._refresh_indicators()  # updates dupe/mult badges + the freq readout
+
+    def _update_freq_readout(self) -> None:
+        freq = self._current_freq()
+        mhz, khz, hz = freq // 1_000_000, (freq // 1000) % 1000, (freq % 1000) // 10
+        band = band_for_freq(freq)
+        text = f"{mhz}.{khz:03d}.{hz:02d}  {band.label if band else '?'}"
+        if self._cat:
+            if self._radio_connected:
+                self._freq.setText(f"📻 {text}")
+                self._freq.setStyleSheet(f"color: {ACCENT}; font-weight: 600;")
+            else:
+                self._freq.setText("📻 no radio")
+                self._freq.setStyleSheet(f"color: {AMBER}; font-weight: 600;")
+        else:
+            self._freq.setText(text)
+            self._freq.setStyleSheet(f"color: {TEXT_DIM};")
 
     # ------------------------------------------------------------------ #
     # entry behavior
@@ -206,6 +286,8 @@ class MainWindow(QMainWindow):
                 edit.setStyleSheet(f"border: 1px solid {MULT}; background-color: {MULT_BG};")
             else:
                 edit.setStyleSheet("")
+
+        self._update_freq_readout()
 
     def _advance_or_log(self) -> None:
         if not self._call.text().strip():
