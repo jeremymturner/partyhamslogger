@@ -93,7 +93,7 @@ class FlexRadioInfo:
 
     def label(self) -> str:
         name = self.nickname or self.callsign or self.model or "FlexRadio"
-        return f"{name} ({self.model} @ {self.ip})"
+        return f"{name} ({self.model or 'FlexRadio'} @ {self.ip})"
 
 
 async def discover(timeout: float = 2.0, port: int = DISCOVERY_PORT) -> list[FlexRadioInfo]:
@@ -169,6 +169,15 @@ class FlexRadio(Radio):
                 raise RadioUnsupported("no FlexRadio found on the network")
             self.info = radios[0]
             self.host, self.port = self.info.ip, self.info.port
+        elif self.info is None:
+            # Best-effort: pull full identity (model/serial/nickname) from a
+            # discovery broadcast matching this host. Broadcast may be blocked, so
+            # don't fail the connection if it doesn't arrive.
+            with contextlib.suppress(Exception):
+                for radio in await discover(timeout=1.5):
+                    if radio.ip == self.host:
+                        self.info = radio
+                        break
 
         self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
         self._reader_task = asyncio.create_task(self._read_loop())
@@ -261,6 +270,14 @@ class FlexRadio(Radio):
     def bands(self) -> dict[str, dict[str, str]]:
         """Per-band settings the radio has reported (RF power, tune power, etc.)."""
         return dict(self._bands)
+
+    def radio_status(self) -> dict[str, str]:
+        """Raw key/value fields from the radio's ``radio`` status object."""
+        return dict(self._radio_status)
+
+    def raw_slices(self) -> dict[int, dict[str, str]]:
+        """Raw key/value fields per slice (for debugging field names)."""
+        return {i: dict(s) for i, s in self._slices.items()}
 
     # ------------------------------------------------------------------ #
     # protocol plumbing

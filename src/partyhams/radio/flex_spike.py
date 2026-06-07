@@ -30,10 +30,16 @@ async def run(args: argparse.Namespace) -> int:
         for r in radios:
             print(f"   found: {r.label()}  serial={r.serial}  v{r.version}", flush=True)
         radio = FlexRadio(radios[0].ip, radios[0].port)
+        radio.info = radios[0]  # carry the discovered identity through
 
     await radio.connect()
     info = radio.radio_info()
     print(f">> connected to {info.label()}  API v{radio.version}", flush=True)
+
+    if args.raw:
+        print(f">> discovery: {info.raw}")
+        print(f">> radio status: {radio.radio_status()}")
+        print(f">> slices: {radio.raw_slices()}")
 
     bands = radio.bands()
     if bands:
@@ -67,6 +73,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=4992, help="control port")
     parser.add_argument("--timeout", type=float, default=2.0, help="discovery seconds")
     parser.add_argument("--interval", type=float, default=0.3, help="poll seconds")
+    parser.add_argument("--raw", action="store_true", help="dump raw discovery/status fields")
     args = parser.parse_args()
     try:
         return asyncio.run(run(args))
