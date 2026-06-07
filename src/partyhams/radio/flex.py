@@ -230,6 +230,17 @@ class FlexRadio(Radio):
     # ------------------------------------------------------------------ #
     # Flex-specific info (the point of a native driver)
     # ------------------------------------------------------------------ #
+    def description(self) -> str:
+        info = self.radio_info()
+        parts = ["FlexRadio"]
+        if info.model:
+            parts.append(info.model)
+        if info.nickname and info.nickname != info.model:
+            parts.append(f"({info.nickname})")
+        text = " ".join(parts)
+        where = info.ip or self.host
+        return f"{text} @ {where}" if where else text
+
     def radio_info(self) -> FlexRadioInfo:
         """Identity/info for the connected radio (from discovery + status)."""
         info = self.info or FlexRadioInfo(ip=self.host or "", port=self.port)

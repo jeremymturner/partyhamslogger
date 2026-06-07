@@ -62,6 +62,10 @@ class Radio(ABC):
     def supports(self, cap: Capability) -> bool:
         return cap in self.capabilities
 
+    def description(self) -> str:
+        """A short human-readable identity for status display (e.g. in the UI)."""
+        return self.backend_name
+
     @abstractmethod
     async def connect(self) -> None:
         """Open the connection to the radio."""

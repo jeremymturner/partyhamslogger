@@ -86,6 +86,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         session.add_listener(self.refresh)
+        # Permanent radio indicator on the right of the status bar.
+        self._radio_status_label = QLabel()
+        self.statusBar().addPermanentWidget(self._radio_status_label)
+
         self.set_poller(radio_poller)
         self._call.setFocus()
         self.refresh()
@@ -114,6 +118,20 @@ class MainWindow(QMainWindow):
             if poller.state is not None:
                 self._apply_radio_state(poller.state)
         self._refresh_indicators()
+        self._update_radio_label()
+
+    def _update_radio_label(self) -> None:
+        if self._poller is None:
+            self._radio_status_label.setText("📻 No radio (manual)")
+            self._radio_status_label.setStyleSheet(f"color: {TEXT_DIM};")
+            return
+        desc = self._poller.radio.description()
+        if self._radio_connected:
+            self._radio_status_label.setText(f"📻 {desc}")
+            self._radio_status_label.setStyleSheet(f"color: {MULT};")
+        else:
+            self._radio_status_label.setText(f"📻 {desc} · disconnected")
+            self._radio_status_label.setStyleSheet(f"color: {AMBER};")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         # Hand control back to the app loop for graceful async shutdown.
@@ -253,6 +271,7 @@ class MainWindow(QMainWindow):
                 f"Radio disconnected{f' ({error})' if error else ''}", 3000
             )
         self._update_freq_readout()
+        self._update_radio_label()
 
     def _apply_radio_state(self, state: RadioState) -> None:
         self._radio_freq = state.freq_hz
@@ -267,6 +286,7 @@ class MainWindow(QMainWindow):
         if mode_idx >= 0:
             self._mode.setCurrentIndex(mode_idx)
         self._refresh_indicators()  # updates dupe/mult badges + the freq readout
+        self._update_radio_label()  # model/nickname may have just arrived
 
     def _update_freq_readout(self) -> None:
         freq = self._current_freq()
@@ -388,10 +408,17 @@ class MainWindow(QMainWindow):
         peers = len(self.session.peers)
         peer_txt = f" &nbsp;|&nbsp; Peers <b style='color:{PEER}'>{peers}</b>" if peers else ""
         call = self.session.config.my_call
+        operator = self.session.engine.operator
         name = self.session.contest.name
         mult_label = self.session.contest.mult_label
+        op_txt = (
+            f" <span style='color:{TEXT_DIM}'>op</span> {operator}"
+            if operator and operator != call
+            else ""
+        )
         self._score_label.setText(
-            f"<b style='color:{ACCENT}'>{call}</b> &nbsp;·&nbsp; {name} &nbsp;|&nbsp; "
+            f"<span style='color:{TEXT_DIM}'>Station</span> "
+            f"<b style='color:{ACCENT}'>{call}</b>{op_txt} &nbsp;·&nbsp; {name} &nbsp;|&nbsp; "
             f"QSOs <b style='color:{TEXT}'>{s.qso_count}</b> &nbsp; "
             f"Pts <b style='color:{TEXT}'>{s.qso_points}</b> &nbsp; "
             f"{mult_label} <b style='color:{MULT}'>{s.mult_count}</b> &nbsp; "
@@ -402,6 +429,7 @@ class MainWindow(QMainWindow):
     def _reload_table(self) -> None:
         qsos = list(reversed(self.session.recent(200)))  # newest first
         self._table.setRowCount(len(qsos))
+        local_station = self.session.engine.station_id
         for row, q in enumerate(qsos):
             exchange = " ".join(
                 q.exchange_rcvd.get(f.name, "") for f in self.session.contest.exchange_fields()
@@ -410,10 +438,11 @@ class MainWindow(QMainWindow):
             if self.session.contest.exchanges_rst:
                 values += [q.rst_sent, q.rst_rcvd]
             values += [exchange.strip(), q.operator]
+            is_peer = q.station_id != local_station  # logged at another station
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)
-                if q.operator != self.session.config.my_call:
-                    item.setForeground(QColor(PEER))  # QSOs from a peer station
+                if is_peer:
+                    item.setForeground(QColor(PEER))
                 self._table.setItem(row, col, item)
 
     # ------------------------------------------------------------------ #

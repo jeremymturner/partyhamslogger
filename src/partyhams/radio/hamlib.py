@@ -69,6 +69,9 @@ class HamlibRadio(Radio):
             | Capability.SEND_CW
         )
 
+    def description(self) -> str:
+        return f"Hamlib @ {self.host}:{self.port}"
+
     async def connect(self) -> None:
         self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
 
