@@ -1,0 +1,27 @@
+"""Pluggable contest engine.
+
+A contest is a data-driven :class:`~partyhams.contest.base.ContestDefinition`.
+Adding a new contest means writing one of these — no changes to the logging core.
+Modules self-register via :func:`~partyhams.contest.registry.register`.
+"""
+
+from partyhams.contest.base import (
+    ContestConfig,
+    ContestDefinition,
+    ExchangeField,
+    ScoreSummary,
+)
+from partyhams.contest.registry import available, get, register
+
+# Importing the module registers it.
+from partyhams.contest import fieldday as _fieldday  # noqa: F401
+
+__all__ = [
+    "ContestConfig",
+    "ContestDefinition",
+    "ExchangeField",
+    "ScoreSummary",
+    "available",
+    "get",
+    "register",
+]
