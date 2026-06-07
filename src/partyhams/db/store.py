@@ -50,9 +50,7 @@ class SqliteLog:
 
     def upsert(self, qso: QSO) -> bool:
         """Insert or update under last-writer-wins. Returns True if state changed."""
-        cur = self._conn.execute(
-            "SELECT lamport, station_id FROM qso WHERE uuid = ?", (qso.uuid,)
-        )
+        cur = self._conn.execute("SELECT lamport, station_id FROM qso WHERE uuid = ?", (qso.uuid,))
         row = cur.fetchone()
         if row is not None:
             existing = (row["lamport"], row["station_id"])

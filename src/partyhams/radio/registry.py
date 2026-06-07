@@ -19,8 +19,7 @@ def register(cls: type[Radio]) -> type[Radio]:
 
 def available() -> list[tuple[str, str]]:
     """Return ``(backend_id, backend_name)`` for every backend, sorted by name."""
-    return sorted(((c.backend_id, c.backend_name) for c in _REGISTRY.values()),
-                  key=lambda t: t[1])
+    return sorted(((c.backend_id, c.backend_name) for c in _REGISTRY.values()), key=lambda t: t[1])
 
 
 def get_backend(backend_id: str) -> type[Radio]:

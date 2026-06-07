@@ -5,6 +5,8 @@ Adding a new contest means writing one of these — no changes to the logging co
 Modules self-register via :func:`~partyhams.contest.registry.register`.
 """
 
+# Importing the module registers it.
+from partyhams.contest import fieldday as _fieldday  # noqa: F401
 from partyhams.contest.base import (
     ContestConfig,
     ContestDefinition,
@@ -12,9 +14,6 @@ from partyhams.contest.base import (
     ScoreSummary,
 )
 from partyhams.contest.registry import available, get, register
-
-# Importing the module registers it.
-from partyhams.contest import fieldday as _fieldday  # noqa: F401
 
 __all__ = [
     "ContestConfig",

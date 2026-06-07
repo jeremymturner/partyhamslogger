@@ -137,8 +137,12 @@ def decode(data: bytes) -> tuple[str, str, Message]:
 
 def _body_to_dict(msg: Message) -> dict:
     if isinstance(msg, Hello):
-        return {"type": "hello", "operator": msg.operator, "call": msg.call,
-                "high_water": msg.high_water}
+        return {
+            "type": "hello",
+            "operator": msg.operator,
+            "call": msg.call,
+            "high_water": msg.high_water,
+        }
     if isinstance(msg, QsoMessage):
         return {"type": "qso", "qso": qso_to_wire(msg.qso)}
     if isinstance(msg, SyncRequest):
@@ -146,16 +150,21 @@ def _body_to_dict(msg: Message) -> dict:
     if isinstance(msg, SyncResponse):
         return {"type": "sync_response", "qsos": [qso_to_wire(q) for q in msg.qsos]}
     if isinstance(msg, Heartbeat):
-        return {"type": "heartbeat", "count": msg.count, "log_hash": msg.log_hash,
-                "lamport_max": msg.lamport_max}
+        return {
+            "type": "heartbeat",
+            "count": msg.count,
+            "log_hash": msg.log_hash,
+            "lamport_max": msg.lamport_max,
+        }
     raise TypeError(f"cannot encode message of type {type(msg).__name__}")
 
 
 def _body_from_dict(obj: dict) -> Message:
     t = obj.get("type")
     if t == "hello":
-        return Hello(operator=obj["operator"], call=obj["call"],
-                     high_water=dict(obj.get("high_water", {})))
+        return Hello(
+            operator=obj["operator"], call=obj["call"], high_water=dict(obj.get("high_water", {}))
+        )
     if t == "qso":
         return QsoMessage(qso=qso_from_wire(obj["qso"]))
     if t == "sync_request":
@@ -163,6 +172,7 @@ def _body_from_dict(obj: dict) -> Message:
     if t == "sync_response":
         return SyncResponse(qsos=[qso_from_wire(q) for q in obj.get("qsos", [])])
     if t == "heartbeat":
-        return Heartbeat(count=obj["count"], log_hash=obj["log_hash"],
-                         lamport_max=obj["lamport_max"])
+        return Heartbeat(
+            count=obj["count"], log_hash=obj["log_hash"], lamport_max=obj["lamport_max"]
+        )
     raise ValueError(f"unknown message type: {t!r}")

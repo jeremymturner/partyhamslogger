@@ -5,12 +5,15 @@ from __future__ import annotations
 import random
 
 from factories import make_qso
+
 from partyhams.net.sync import LogMerge
 
 
 def test_lww_higher_lamport_wins_either_order():
     v1 = make_qso("K1A", uuid="same", station_id="s1", lamport=1)
-    v2 = make_qso("K1A", uuid="same", station_id="s1", lamport=2, exchange={"class": "3A", "section": "OR"})
+    v2 = make_qso(
+        "K1A", uuid="same", station_id="s1", lamport=2, exchange={"class": "3A", "section": "OR"}
+    )
 
     a = LogMerge()
     a.apply(v1)

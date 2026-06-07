@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
 from factories import make_qso
+
 from partyhams.core.models import Mode
 from partyhams.net import protocol as p
 

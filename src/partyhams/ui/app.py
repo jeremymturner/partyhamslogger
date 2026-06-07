@@ -30,7 +30,7 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(_centered(f"<h1>PartyHams Logger</h1>"))
+        layout.addWidget(_centered("<h1>PartyHams Logger</h1>"))
         layout.addWidget(_centered("Multi-station amateur radio contest logger"))
         layout.addWidget(_centered(f"<b>Contests:</b> {contests}"))
         layout.addWidget(_centered(f"<b>Radio backends:</b> {backends}"))

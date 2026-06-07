@@ -7,6 +7,11 @@ FlexRadio 6500 → ``flex``, Icom IC-705/IC-7610 → ``icom-civ``, Yaesu FT-891 
 ``hamlib``.
 """
 
+from partyhams.radio import flex as _flex  # noqa: F401
+
+# Import backends so they register.
+from partyhams.radio import hamlib as _hamlib  # noqa: F401
+from partyhams.radio import icom_civ as _icom  # noqa: F401
 from partyhams.radio.base import (
     Capability,
     Radio,
@@ -14,11 +19,6 @@ from partyhams.radio.base import (
     RadioUnsupported,
 )
 from partyhams.radio.registry import available, get_backend, register
-
-# Import backends so they register.
-from partyhams.radio import hamlib as _hamlib  # noqa: F401
-from partyhams.radio import flex as _flex  # noqa: F401
-from partyhams.radio import icom_civ as _icom  # noqa: F401
 
 __all__ = [
     "Capability",

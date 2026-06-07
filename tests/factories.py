@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import itertools
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from partyhams.core.models import QSO, Mode
 
@@ -37,7 +37,7 @@ def make_qso(
         lamport=lamport,
         deleted=deleted,
         call=call,
-        timestamp=datetime(2026, 6, 27, 18, 0, 0, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 6, 27, 18, 0, 0, tzinfo=UTC),
         freq_hz=freq_hz,
         mode=mode,
         rst_sent="599",

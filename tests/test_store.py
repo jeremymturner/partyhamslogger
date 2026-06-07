@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from factories import make_qso
+
 from partyhams.core.models import Mode
 from partyhams.db import SqliteLog
 
@@ -26,9 +27,18 @@ def test_upsert_lww():
     # Stale update is rejected.
     assert log.upsert(make_qso("K1A", uuid="u1", station_id="s1", lamport=1)) is False
     # Newer update wins.
-    assert log.upsert(
-        make_qso("K1A", uuid="u1", station_id="s1", lamport=2, exchange={"class": "9A", "section": "DX"})
-    ) is True
+    assert (
+        log.upsert(
+            make_qso(
+                "K1A",
+                uuid="u1",
+                station_id="s1",
+                lamport=2,
+                exchange={"class": "9A", "section": "DX"},
+            )
+        )
+        is True
+    )
     assert log.all()[0].exchange_rcvd == {"class": "9A", "section": "DX"}
 
 

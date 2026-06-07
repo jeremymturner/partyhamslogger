@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 class ModeGroup(enum.Enum):
@@ -104,7 +104,7 @@ def band_by_label(label: str) -> Band | None:
 
 def utcnow() -> datetime:
     """Timezone-aware current UTC time (QSOs are always logged in UTC)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
 from factories import FREQ, make_qso
+
 from partyhams.contest import get
 from partyhams.contest.base import ContestConfig
 from partyhams.contest.fieldday import PowerCategory, is_valid_class

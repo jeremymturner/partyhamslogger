@@ -76,7 +76,7 @@ class ContestDefinition(ABC):
         if len(tokens) < sum(1 for f in fields if f.required):
             raise ValueError(f"exchange '{raw}' has too few fields for {self.id}")
         out: dict[str, str] = {}
-        for fld, tok in zip(fields, tokens):
+        for fld, tok in zip(fields, tokens, strict=False):
             out[fld.name] = tok
         return out
 
