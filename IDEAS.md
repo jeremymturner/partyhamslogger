@@ -242,6 +242,9 @@ Legend: `[MVP]` first release · `[v1]` 1.0 · `[later]` post-1.0
   N1MM. **Run vs S&P banks** (separate CW/phone sets per mode), **ESM** (Enter
   sends the next message with the next-key highlighted), and **Escape = stop TX**.
 - [MVP] Cabrillo export
+- ✅ **Sections worked window — DONE.** All ARRL/RAC sections grouped by call
+  district (0–9, VE, DX), worked/needed, with Band + Mode filters for
+  band / mode / band+mode views (View → Sections Worked).
 - [v1] More contest modules, rate meters, goals
 - [v1] Run/S&P macro sets
 

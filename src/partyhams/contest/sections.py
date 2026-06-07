@@ -131,3 +131,29 @@ ARRL_SECTIONS: frozenset[str] = frozenset(
 
 def is_valid_section(value: str) -> bool:
     return value.upper() in ARRL_SECTIONS
+
+
+# Sections grouped by US call district (0–9), VE for Canada, DX for the rest.
+# This is the conventional call-area grouping used by section maps (PR/VI sit with
+# the Southeastern "4" group; AK/PAC with their nearest mainland district).
+SECTION_GROUPS: dict[str, tuple[str, ...]] = {
+    "0": ("CO", "IA", "KS", "MN", "MO", "ND", "NE", "SD"),
+    "1": ("CT", "EMA", "ME", "NH", "RI", "VT", "WMA"),
+    "2": ("ENY", "NLI", "NNJ", "NNY", "SNJ", "WNY"),
+    "3": ("DE", "EPA", "MDC", "WPA"),
+    "4": ("AL", "GA", "KY", "NC", "NFL", "PR", "SC", "SFL", "TN", "VA", "VI", "WCF"),
+    "5": ("AR", "LA", "MS", "NM", "NTX", "OK", "STX", "WTX"),
+    "6": ("EB", "LAX", "ORG", "PAC", "SB", "SCV", "SDG", "SF", "SJV", "SV"),
+    "7": ("AK", "AZ", "EWA", "ID", "MT", "NV", "OR", "UT", "WWA", "WY"),
+    "8": ("MI", "OH", "WV"),
+    "9": ("IL", "IN", "WI"),
+    "VE": ("AB", "BC", "GH", "MB", "NB", "NL", "NS", "ONE", "ONN", "ONS", "PE", "QC", "SK", "TER"),
+    "DX": ("DX",),
+}
+
+_SECTION_TO_GROUP = {sec: grp for grp, secs in SECTION_GROUPS.items() for sec in secs}
+
+
+def section_group(section: str) -> str:
+    """The call-district group ("0"–"9", "VE", "DX") for a section, or "?"."""
+    return _SECTION_TO_GROUP.get(section.upper(), "?")

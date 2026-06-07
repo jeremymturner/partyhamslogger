@@ -39,6 +39,7 @@ from partyhams.core.models import Band, Mode, band_by_label, band_for_freq, mode
 from partyhams.radio.base import Capability, RadioState
 from partyhams.ui.macros_dialog import MacrosDialog
 from partyhams.ui.network_panel import NetworkPanel
+from partyhams.ui.sections_window import SectionsWindow
 from partyhams.ui.style import ACCENT, AMBER, DUPE, MULT, MULT_BG, PEER, TEXT, TEXT_DIM
 from partyhams.ui.widgets import make_upper
 
@@ -62,6 +63,7 @@ class MainWindow(QMainWindow):
         self._run = True  # Run vs Search & Pounce (picks the macro bank)
         self._esm = False  # ESM: Enter sends the next message
         self._esm_sent = False  # have we sent our exchange/call this QSO?
+        self._sections_window: SectionsWindow | None = None
         #: Set by the app to a no-arg callback that re-runs the radio screen.
         self.on_change_radio: Callable[[], None] | None = None
         self._radio_dialog = None  # app keeps the open radio dialog alive here
@@ -118,7 +120,7 @@ class MainWindow(QMainWindow):
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-        self.menuBar().addMenu("View").addAction(dock.toggleViewAction())
+        self._view_menu.addAction(dock.toggleViewAction())
 
         self.session.add_chat_listener(self._panel.append_chat)
         self.session.add_roster_listener(self._panel.refresh_roster)
@@ -370,6 +372,17 @@ class MainWindow(QMainWindow):
         esm_action = macros_menu.addAction("ESM — Enter sends messages")
         esm_action.setCheckable(True)
         esm_action.toggled.connect(self._set_esm)
+
+        # The dock toggle is added to this menu later by _build_network_panel.
+        self._view_menu = self.menuBar().addMenu("View")
+        self._view_menu.addAction("Sections Worked…", self._open_sections)
+
+    def _open_sections(self) -> None:
+        if self._sections_window is None:
+            self._sections_window = SectionsWindow(self.session)
+        self._sections_window.show()
+        self._sections_window.raise_()
+        self._sections_window.activateWindow()
 
     def _radio_menu_clicked(self) -> None:
         if self.on_change_radio is not None:

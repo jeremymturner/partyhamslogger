@@ -310,6 +310,15 @@ class LogSession:
     def allowed_bands(self) -> set[str]:
         return self.contest.allowed_bands()
 
+    def section_status(self) -> dict[str, set[tuple[str, str]]]:
+        """Per section worked, the set of ``(band, mode_group)`` slots it was on."""
+        status: dict[str, set[tuple[str, str]]] = {}
+        for qso in self.engine.log.qsos():
+            section = qso.exchange_rcvd.get("section", "").upper()
+            if section:
+                status.setdefault(section, set()).add((qso.band_label, qso.mode_group.value))
+        return status
+
     # ------------------------------------------------------------------ #
     # export
     # ------------------------------------------------------------------ #

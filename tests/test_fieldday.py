@@ -8,7 +8,12 @@ from factories import FREQ, make_qso
 from partyhams.contest import get
 from partyhams.contest.base import ContestConfig
 from partyhams.contest.fieldday import PowerCategory, is_valid_class
-from partyhams.contest.sections import ARRL_SECTIONS, is_valid_section
+from partyhams.contest.sections import (
+    ARRL_SECTIONS,
+    SECTION_GROUPS,
+    is_valid_section,
+    section_group,
+)
 from partyhams.core.models import Mode
 
 
@@ -44,6 +49,18 @@ def test_section_list_matches_official_contest_list():
     # Abbreviations ADIF marks deleted must stay out (we validate current entries):
     for retired in ("GTA", "MAR", "NT", "NWT", "ON"):
         assert retired not in ARRL_SECTIONS
+
+
+def test_section_groups_partition_all_sections():
+    # Every section is in exactly one call-district group, and together they cover
+    # the whole official list.
+    grouped = [sec for secs in SECTION_GROUPS.values() for sec in secs]
+    assert len(grouped) == len(set(grouped))  # no duplicates
+    assert set(grouped) == ARRL_SECTIONS  # full coverage
+    assert section_group("OR") == "7"
+    assert section_group("EPA") == "3"
+    assert section_group("QC") == "VE"
+    assert section_group("DX") == "DX"
 
 
 def test_parse_exchange(fd):

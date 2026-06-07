@@ -89,6 +89,23 @@ async def test_field_day_logs_no_rst():
     assert qso.rst_sent == "" and qso.rst_rcvd == ""
 
 
+async def test_section_status_tracks_band_mode_slots():
+    s = make_session()
+    await s.log_qso(
+        call="K1A", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "2A", "section": "EPA"}
+    )
+    await s.log_qso(
+        call="K2B", freq_hz=FREQ_40M, mode=Mode.USB, exchange={"class": "1A", "section": "EPA"}
+    )
+    await s.log_qso(
+        call="K3C", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1A", "section": "OR"}
+    )
+    status = s.section_status()
+    assert status["EPA"] == {("20m", "CW"), ("40m", "PHONE")}
+    assert status["OR"] == {("20m", "CW")}
+    assert "STX" not in status  # not worked
+
+
 async def test_partial_matches():
     s = make_session()
     for call in ("K1ABC", "K1AXY", "W2ZZZ"):
