@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from partyhams.app.session import LogSession
 from partyhams.ui.style import ACCENT, AMBER, MULT, PEER, TEXT_DIM
 
-_COLUMNS = ["Op", "Freq", "Mode", "5m", "15m", "30m", "60m"]
+_COLUMNS = ["Op", "Freq", "Mode", "15m", "30m", "60m"]
 
 
 def _fmt_freq(freq_hz: int) -> str:
@@ -52,7 +52,7 @@ class NetworkPanel(QWidget):
         #: Wired by the main window: on_send_chat(to_op, text).
         self.on_send_chat: Callable[[str, str], None] | None = None
         self._known_ops: list[str] = []
-        self.setMinimumWidth(322)
+        self.setMinimumWidth(292)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
 
@@ -73,7 +73,7 @@ class NetworkPanel(QWidget):
         self._table.setStyleSheet(
             "QHeaderView::section { padding: 4px 2px; }QTableWidget::item { padding: 2px 4px; }"
         )
-        for col, width in enumerate((72, 62, 44, 33, 33, 33, 33)):
+        for col, width in enumerate((72, 62, 44, 38, 38, 38)):
             self._table.setColumnWidth(col, width)
         sv.addWidget(self._table)
         splitter.addWidget(stations)
@@ -124,7 +124,6 @@ class NetworkPanel(QWidget):
                 r["operator"] or "?",
                 _fmt_freq(r["freq_hz"]),
                 r["mode"] or "—",
-                str(rates[5]),
                 str(rates[15]),
                 str(rates[30]),
                 str(rates[60]),

@@ -24,7 +24,7 @@ from partyhams.export import write_adif, write_cabrillo
 from partyhams.net.engine import SyncEngine
 from partyhams.net.transport import MulticastTransport, NullTransport
 
-RATE_WINDOWS_MIN = (5, 15, 30, 60)  # QSO-rate windows shown in the network panel
+RATE_WINDOWS_MIN = (15, 30, 60)  # QSO-rate windows shown in the network panel
 
 
 def default_rst(mode: Mode) -> str:

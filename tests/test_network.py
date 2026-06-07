@@ -47,7 +47,7 @@ def test_station_rates_windows():
         q.timestamp = now - timedelta(minutes=minutes)
         s.engine.log.apply(q)
     rates = s.station_rates(sid, now=now)
-    assert rates[5] == 1  # only the 2-min QSO
+    assert 5 not in rates
     assert rates[15] == 2  # 2 + 10
     assert rates[30] == 3  # 2 + 10 + 20
     assert rates[60] == 4  # all four
