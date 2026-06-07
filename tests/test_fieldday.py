@@ -8,7 +8,7 @@ from factories import FREQ, make_qso
 from partyhams.contest import get
 from partyhams.contest.base import ContestConfig
 from partyhams.contest.fieldday import PowerCategory, is_valid_class
-from partyhams.contest.sections import is_valid_section
+from partyhams.contest.sections import ARRL_SECTIONS, is_valid_section
 from partyhams.core.models import Mode
 
 
@@ -32,6 +32,17 @@ def test_class_and_section_validation():
     assert is_valid_section("epa")  # case-insensitive
     assert is_valid_section("DX")
     assert not is_valid_section("ZZ")
+
+
+def test_section_list_matches_official_contest_list():
+    # 85 ARRL/RAC contest sections + DX (contests.arrl.org, verified 2026-06-06).
+    assert len(ARRL_SECTIONS) == 86
+    # Sections that were missing/outdated before verification:
+    for added in ("SNJ", "NNJ", "WNY", "GH", "NB", "NS", "PE"):
+        assert added in ARRL_SECTIONS
+    # The pre-2024 RAC abbreviations are no longer used by ARRL contests:
+    for retired in ("GTA", "MAR"):
+        assert retired not in ARRL_SECTIONS
 
 
 def test_parse_exchange(fd):

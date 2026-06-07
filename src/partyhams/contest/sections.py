@@ -1,17 +1,40 @@
-"""ARRL/RAC section abbreviations used by Field Day (and ARRL/RAC contests).
+"""ARRL/RAC contest section abbreviations (used by Field Day, Sweepstakes, etc.).
 
-Source: ARRL Field Day rules / ARRL section list. ``DX`` represents any station
+Source: the official ARRL/RAC *contest* section list,
+https://contests.arrl.org/contestmultipliers.php?a=wve (verified 2026-06-06) —
+85 sections (71 US + 14 Canadian). ``DX`` is added as the designator for stations
 outside the US and Canada.
+
+Note: this is the *contest* list, which differs from the ARES/organizational list
+at arrl.org/section-abbreviations. Per RAC's restructuring, the Canadian sections
+are AB, BC, GH (Golden Horseshoe), MB, NB, NL, NS, ONE, ONN, ONS, PE, QC, SK, TER
+— i.e. GH replaced the former GTA, and the Maritimes (formerly MAR) are split into
+NB/NS/PE.
 """
 
 from __future__ import annotations
 
 ARRL_SECTIONS: frozenset[str] = frozenset(
     {
+        # New England Division
+        "CT",
+        "EMA",
+        "ME",
+        "NH",
+        "RI",
+        "VT",
+        "WMA",
+        # Hudson Division
+        "ENY",
+        "NLI",
+        "NNJ",
         # Atlantic Division
         "DE",
         "EPA",
         "MDC",
+        "NNY",
+        "SNJ",
+        "WNY",
         "WPA",
         # Central Division
         "IL",
@@ -30,24 +53,12 @@ ARRL_SECTIONS: frozenset[str] = frozenset(
         "KY",
         "MI",
         "OH",
-        # Hudson Division
-        "ENY",
-        "NLI",
-        "NNY",
         # Midwest Division
         "IA",
         "KS",
         "MO",
         "NE",
-        # New England Division
-        "CT",
-        "EMA",
-        "ME",
-        "NH",
-        "RI",
-        "VT",
-        "WMA",
-        # Northwestern Division
+        # New England covered above; Northwestern Division
         "AK",
         "EWA",
         "ID",
@@ -94,13 +105,15 @@ ARRL_SECTIONS: frozenset[str] = frozenset(
         # Canada (RAC)
         "AB",
         "BC",
-        "GTA",
-        "MAR",
+        "GH",
         "MB",
+        "NB",
         "NL",
+        "NS",
         "ONE",
         "ONN",
         "ONS",
+        "PE",
         "QC",
         "SK",
         "TER",

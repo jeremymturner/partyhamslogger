@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from partyhams.app.session import LogSession
 from partyhams.core.models import Band, Mode, band_by_label
 from partyhams.ui.style import ACCENT, AMBER, DUPE, MULT, MULT_BG, PEER, TEXT
+from partyhams.ui.widgets import make_upper
 
 # Modes offered in the entry row.
 _ENTRY_MODES = [Mode.CW, Mode.USB, Mode.LSB, Mode.FM, Mode.RTTY, Mode.FT8]
@@ -90,6 +91,7 @@ class MainWindow(QMainWindow):
         self._call = QLineEdit()
         self._call.setPlaceholderText("Call")
         self._call.setMaximumWidth(140)
+        make_upper(self._call)
         self._call.textChanged.connect(lambda *_: self._refresh_indicators())
         self._call.returnPressed.connect(self._advance_or_log)
         hbox.addWidget(QLabel("Call"))
@@ -101,6 +103,7 @@ class MainWindow(QMainWindow):
             edit = QLineEdit()
             edit.setMaximumWidth(90)
             edit.setPlaceholderText(field.label)
+            make_upper(edit)
             edit.returnPressed.connect(self._advance_or_log)
             edit.textChanged.connect(lambda *_: self._refresh_indicators())
             self._exchange_edits[field.name] = edit

@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
 )
 
+from partyhams.ui.widgets import make_upper
+
 # (label, power-category key) — keys match PowerCategory in contest.fieldday.
 _POWER_OPTIONS = [
     ("Low — ≤150 W (×2)", "low_150w"),
@@ -41,6 +43,9 @@ class StartDialog(QDialog):
         self._network.setPlaceholderText("blank = solo / offline")
         self._operator = QLineEdit()
         self._operator.setPlaceholderText("this operator (defaults to station call)")
+
+        # Callsign/class/section/operator are upper case; network name is free-form.
+        make_upper(self._call, self._class, self._section, self._operator)
 
         form = QFormLayout(self)
         form.addRow("Station call", self._call)
