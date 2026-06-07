@@ -41,6 +41,16 @@ class ConfigField:
 
 
 @dataclass
+class Macro:
+    """One F-key message. For CW/digital ``content`` is text (with ``{VAR}``
+    substitutions); for phone it's a ``.wav`` file path."""
+
+    key: int  # 1..12
+    label: str
+    content: str
+
+
+@dataclass
 class ContestConfig:
     """Per-station, per-event settings the operator fills in before logging.
 
@@ -79,6 +89,32 @@ class ContestDefinition(ABC):
     exchanges_rst: bool = True
     #: UI label for this contest's multipliers (e.g. "Zones", "Sections").
     mult_label: str = "Mults"
+
+    # --- F-key macros ---
+    def default_macros(self) -> dict[str, list[Macro]]:
+        """Default F-key messages per mode group ("CW" / "PHONE").
+
+        CW content uses ``{VAR}`` substitutions (``{MYCALL}``, ``{CALL}``,
+        ``{EXCH}``, ``{LOG}``, ``{WIPE}``, …); phone content is a ``.wav`` path.
+        Contests override this with event-specific wording (Field Day does).
+        """
+        cw = [
+            Macro(1, "CQ", "CQ {MYCALL} {MYCALL}"),
+            Macro(2, "Exch", "{EXCH}"),
+            Macro(3, "TU", "TU {MYCALL} {LOG}"),
+            Macro(4, "MyCall", "{MYCALL}"),
+            Macro(5, "HisCall", "{CALL}"),
+            Macro(6, "Repeat", "{EXCH} {EXCH}"),
+            Macro(7, "", ""),
+            Macro(8, "Agn?", "AGN?"),
+            Macro(9, "Nr?", "NR?"),
+            Macro(10, "Call?", "CL?"),
+            Macro(11, "", ""),
+            Macro(12, "Wipe", "{WIPE}"),
+        ]
+        phone_labels = ["CQ", "Exch", "TU", "QRZ", "", "", "", "", "", "", "", ""]
+        phone = [Macro(i + 1, lbl, "") for i, lbl in enumerate(phone_labels)]
+        return {"CW": cw, "PHONE": phone}
 
     # --- setup / exchange ---
     def config_fields(self) -> list[ConfigField]:

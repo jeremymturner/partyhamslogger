@@ -15,9 +15,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QColor
+from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
@@ -31,10 +32,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from partyhams.app.macros import expand, load_macros, save_macros
 from partyhams.app.radio import RadioPoller
-from partyhams.app.session import LogSession
-from partyhams.core.models import Band, Mode, band_by_label, band_for_freq
-from partyhams.radio.base import RadioState
+from partyhams.app.session import LogSession, default_rst
+from partyhams.core.models import Band, Mode, band_by_label, band_for_freq, mode_group_for
+from partyhams.radio.base import Capability, RadioState
+from partyhams.ui.macros_dialog import MacrosDialog
 from partyhams.ui.network_panel import NetworkPanel
 from partyhams.ui.style import ACCENT, AMBER, DUPE, MULT, MULT_BG, PEER, TEXT, TEXT_DIM
 from partyhams.ui.widgets import make_upper
@@ -53,6 +56,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.session = session
         self._on_close = on_close
+        self._macros = load_macros(session.contest)  # this event's F-key macros
+        self._macros_dialog = None
+        self._sound = None  # keep a ref to the playing voice clip
         #: Set by the app to a no-arg callback that re-runs the radio screen.
         self.on_change_radio: Callable[[], None] | None = None
         self._radio_dialog = None  # app keeps the open radio dialog alive here
@@ -84,7 +90,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_score_bar())
         layout.addWidget(self._build_entry_row())
         layout.addWidget(self._build_log_table(), stretch=1)
+        layout.addWidget(self._build_fkey_bar())
         self.setCentralWidget(root)
+        self._setup_fkey_shortcuts()
 
         session.add_listener(self.refresh)
         # Permanent radio indicator on the right of the status bar.
@@ -122,6 +130,126 @@ class MainWindow(QMainWindow):
         if self._loop is not None and self._loop.is_running():
             self._loop.create_task(self.session.broadcast_chat(to_op, text))
 
+    # ------------------------------------------------------------------ #
+    # F-key macros
+    # ------------------------------------------------------------------ #
+    def _build_fkey_bar(self) -> QWidget:
+        bar = QWidget()
+        hbox = QHBoxLayout(bar)
+        hbox.setContentsMargins(2, 2, 2, 2)
+        hbox.setSpacing(3)
+        self._fkey_buttons: list[QPushButton] = []
+        for key in range(1, 13):
+            btn = QPushButton()
+            btn.setMinimumHeight(34)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # keep focus in the call field
+            btn.clicked.connect(lambda _checked=False, k=key: self._fire_macro(k))
+            self._fkey_buttons.append(btn)
+            hbox.addWidget(btn)
+        return bar
+
+    def _setup_fkey_shortcuts(self) -> None:
+        for key in range(1, 13):
+            seq = QKeySequence(getattr(Qt.Key, f"Key_F{key}"))
+            shortcut = QShortcut(seq, self)
+            shortcut.activated.connect(lambda k=key: self._fire_macro(k))
+
+    def _current_group(self) -> str:
+        return mode_group_for(self._current_mode()).value
+
+    def _update_fkey_bar(self) -> None:
+        group = self._current_group()
+        for key, btn in enumerate(self._fkey_buttons, start=1):
+            macro = self._macros.get(group, key)
+            label = macro.label if macro else ""
+            btn.setText(f"F{key}\n{label}" if label else f"F{key}")
+            btn.setEnabled(bool(macro and macro.content.strip()))
+
+    def _macro_context(self) -> dict[str, str]:
+        sent = self.session.config.sent_exchange
+        ctx = {
+            "MYCALL": self.session.config.my_call,
+            "CALL": self._call.text().strip().upper(),
+            "EXCH": " ".join(v for v in sent.values() if v),
+            "OP": self.session.engine.operator,
+            "RST": default_rst(self._current_mode()),
+        }
+        for name, value in sent.items():
+            ctx[name.upper()] = value
+        return ctx
+
+    def _fire_macro(self, key: int) -> None:
+        group = self._current_group()
+        macro = self._macros.get(group, key)
+        if macro is None or not macro.content.strip():
+            return
+        if group == "DIGITAL":
+            self.statusBar().showMessage("Digital macros not supported yet", 3000)
+            return
+        if group == "PHONE":
+            self._play_wav(macro.content)
+            return
+        # CW / text
+        text, actions = expand(macro.content, self._macro_context())
+        if text:
+            self._send_cw(text)
+        for action in actions:
+            if action == "log":
+                self._try_log()
+            elif action == "wipe":
+                self._wipe_entry()
+
+    def _send_cw(self, text: str) -> None:
+        radio = self._poller.radio if self._poller is not None else None
+        if radio is None or not radio.supports(Capability.SEND_CW):
+            self.statusBar().showMessage("No CW keyer — configure a radio", 3000)
+            return
+        if self._loop is not None and self._loop.is_running():
+            self._loop.create_task(self._do_send_cw(radio, text))
+
+    async def _do_send_cw(self, radio, text: str) -> None:
+        try:
+            await radio.send_cw(text, wpm=self._macros.cw_wpm)
+            self.statusBar().showMessage(f"CW: {text}", 2500)
+        except Exception as exc:  # noqa: BLE001 - surface keyer errors, don't crash
+            self.statusBar().showMessage(f"CW failed: {exc}", 4000)
+
+    def _play_wav(self, path: str) -> None:
+        if not path:
+            self.statusBar().showMessage("No audio assigned to that key", 2500)
+            return
+        if not Path(path).exists():
+            self.statusBar().showMessage(f"Audio file not found: {path}", 4000)
+            return
+        try:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtMultimedia import QSoundEffect
+        except ImportError:
+            self.statusBar().showMessage("Audio unavailable (QtMultimedia missing)", 4000)
+            return
+        self._sound = QSoundEffect(self)
+        self._sound.setSource(QUrl.fromLocalFile(path))
+        self._sound.play()
+
+    def _wipe_entry(self) -> None:
+        self._call.clear()
+        for edit in self._exchange_edits.values():
+            edit.clear()
+        self._call.setFocus()
+
+    def _edit_macros(self) -> None:
+        dialog = MacrosDialog(self._macros, self.session.contest, parent=self)
+        self._macros_dialog = dialog  # keep alive while open
+        dialog.finished.connect(lambda result: self._on_macros_done(dialog, result))
+        dialog.open()
+
+    def _on_macros_done(self, dialog: MacrosDialog, result: int) -> None:
+        self._macros_dialog = None
+        if result == QDialog.DialogCode.Accepted.value:
+            self._macros = dialog.result_macroset()
+            save_macros(self.session.contest.id, self._macros)
+            self._update_fkey_bar()
+
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("File")
         file_menu.addAction("Export ADIF…", self._export_adif)
@@ -129,6 +257,9 @@ class MainWindow(QMainWindow):
 
         radio_menu = self.menuBar().addMenu("Radio")
         radio_menu.addAction("Select Radio…", self._radio_menu_clicked)
+
+        macros_menu = self.menuBar().addMenu("Macros")
+        macros_menu.addAction("Edit Macros…", self._edit_macros)
 
     def _radio_menu_clicked(self) -> None:
         if self.on_change_radio is not None:
@@ -353,6 +484,7 @@ class MainWindow(QMainWindow):
                 edit.setStyleSheet("")
 
         self._update_freq_readout()
+        self._update_fkey_bar()  # F-key labels follow the mode (CW vs phone)
         # Let peers see what band/mode we're on (broadcast by the presence loop).
         self.session.set_local_status(freq, mode)
 

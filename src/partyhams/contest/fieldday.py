@@ -24,6 +24,7 @@ from partyhams.contest.base import (
     ContestConfig,
     ContestDefinition,
     ExchangeField,
+    Macro,
     ScoreSummary,
 )
 from partyhams.contest.registry import register
@@ -85,6 +86,27 @@ class FieldDay(ContestDefinition):
     cabrillo_name = "ARRL-FD"
     exchanges_rst = False  # Field Day exchange is class + section only — no RST
     mult_label = "Sections"
+
+    def default_macros(self) -> dict[str, list[Macro]]:
+        # Modeled on N1MM's Field Day CW messages (FD exchange = class + section,
+        # no RST). F3 sends TU and logs the QSO.
+        cw = [
+            Macro(1, "CQ", "CQ FD {MYCALL} {MYCALL} FD"),
+            Macro(2, "Exch", "{EXCH}"),
+            Macro(3, "TU", "TU {MYCALL} FD {LOG}"),
+            Macro(4, "MyCall", "{MYCALL}"),
+            Macro(5, "HisCall", "{CALL}"),
+            Macro(6, "Repeat", "{EXCH} {EXCH}"),
+            Macro(7, "Sec?", "SEC?"),
+            Macro(8, "Agn?", "AGN?"),
+            Macro(9, "Cls?", "CL?"),
+            Macro(10, "Call?", "CALL?"),
+            Macro(11, "", ""),
+            Macro(12, "Wipe", "{WIPE}"),
+        ]
+        phone_labels = ["CQ FD", "Exch", "TU", "QRZ", "", "", "", "", "", "", "", ""]
+        phone = [Macro(i + 1, lbl, "") for i, lbl in enumerate(phone_labels)]
+        return {"CW": cw, "PHONE": phone}
 
     def config_fields(self) -> list[ConfigField]:
         return [

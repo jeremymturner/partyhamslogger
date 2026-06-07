@@ -61,6 +61,21 @@ async def test_set_frequency_and_mode():
     await fake.stop()
 
 
+async def test_send_cw_via_cwx():
+    fake = FakeFlex()
+    host, port = await fake.start()
+    radio = FlexRadio(host, port)
+    await radio.connect()
+
+    await radio.send_cw("CQ FD W7ABC", wpm=26)
+    assert fake.cw_wpm == "26"
+    # Spaces round-trip through the 0x7F encoding.
+    assert fake.cwx_sent == ["CQ FD W7ABC"]
+
+    await radio.disconnect()
+    await fake.stop()
+
+
 async def test_discover_loopback():
     # Find a free UDP port, then run discovery on it and unicast a packet to it.
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

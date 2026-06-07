@@ -227,6 +227,12 @@ class FlexRadio(Radio):
             raise RadioUnsupported(f"FlexRadio has no mapping for {mode}")
         await self._command(f"slice set {idx} mode={flex_mode}")
 
+    async def send_cw(self, text: str, wpm: int | None = None) -> None:
+        # SmartSDR CWX: spaces must be sent as 0x7F, not a literal space.
+        if wpm is not None:
+            await self._command(f"cwx wpm {wpm}")
+        await self._command("cwx send " + text.replace(" ", "\x7f"))
+
     # ------------------------------------------------------------------ #
     # Flex-specific info (the point of a native driver)
     # ------------------------------------------------------------------ #

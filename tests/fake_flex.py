@@ -34,6 +34,8 @@ class FakeFlex:
         }
         self.radio_status: dict[str, str] = {"model": "FLEX-6500", "callsign": "W7ABC"}
         self.bands: dict[str, dict[str, str]] = {"20": {"rfpower": "100", "tunepower": "10"}}
+        self.cwx_sent: list[str] = []  # decoded CW text we were asked to send
+        self.cw_wpm: str | None = None
         self._server: asyncio.AbstractServer | None = None
         self._writers: set[asyncio.StreamWriter] = set()
 
@@ -94,6 +96,11 @@ class FakeFlex:
                     key, _, value = tok.partition("=")
                     self.slices[idx][key] = value
             self._push_slice(idx, writer)
+        elif tokens[:2] == ["cwx", "send"]:
+            payload = cmd.split(" ", 2)[2] if len(tokens) >= 3 else ""
+            self.cwx_sent.append(payload.replace("\x7f", " "))  # decode 0x7F -> space
+        elif tokens[:2] == ["cwx", "wpm"]:
+            self.cw_wpm = tokens[2]
         # Acknowledge the command (0 == success).
         writer.write(f"R{seq}|0|\n".encode())
 
