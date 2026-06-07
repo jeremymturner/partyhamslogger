@@ -68,7 +68,7 @@ class MainWindow(QMainWindow):
         self._radio_connected = False
 
         self.setWindowTitle(f"PartyHams Logger — {session.config.my_call} — {session.contest.name}")
-        self.resize(900, 560)
+        self.resize(1060, 580)
 
         # Log columns adapt to the contest (Field Day has no RST exchange).
         self._columns = ["UTC", "Call", "Band", "Mode"]
@@ -154,7 +154,8 @@ class MainWindow(QMainWindow):
 
         self._call = QLineEdit()
         self._call.setPlaceholderText("Call")
-        self._call.setMaximumWidth(140)
+        self._call.setMinimumWidth(110)
+        self._call.setMaximumWidth(160)
         make_upper(self._call)
         self._call.textChanged.connect(lambda *_: self._refresh_indicators())
         self._call.returnPressed.connect(self._advance_or_log)
@@ -165,7 +166,8 @@ class MainWindow(QMainWindow):
         self._exchange_edits: dict[str, QLineEdit] = {}
         for field in self.session.contest.exchange_fields():
             edit = QLineEdit()
-            edit.setMaximumWidth(90)
+            edit.setMinimumWidth(72)
+            edit.setMaximumWidth(100)
             edit.setPlaceholderText(field.label)
             make_upper(edit)
             edit.returnPressed.connect(self._advance_or_log)
@@ -192,17 +194,21 @@ class MainWindow(QMainWindow):
         hbox.addWidget(QLabel("Mode"))
         hbox.addWidget(self._mode)
 
-        # Frequency readout (live from CAT when a radio is connected).
+        # Frequency readout (live from CAT when a radio is connected). Fixed width
+        # so its content changing doesn't shift the row.
         self._freq = QLabel()
+        self._freq.setFixedWidth(140)
         self._freq.setStyleSheet(f"color: {ACCENT}; font-weight: 600;")
         hbox.addWidget(self._freq)
 
-        # Status indicators: new-multiplier (green) and dupe (red).
+        # Status indicators: new-multiplier (green) and dupe (red). Both reserve a
+        # fixed width so showing/hiding a badge never squishes the entry fields.
         self._mult = QLabel()
+        self._mult.setFixedWidth(110)
         self._mult.setStyleSheet(f"font-weight: bold; color: {MULT};")
         hbox.addWidget(self._mult)
         self._dupe = QLabel()
-        self._dupe.setMinimumWidth(60)
+        self._dupe.setFixedWidth(75)
         self._dupe.setStyleSheet(f"font-weight: bold; color: {DUPE};")
         hbox.addWidget(self._dupe)
 
