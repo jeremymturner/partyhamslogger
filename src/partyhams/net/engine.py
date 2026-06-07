@@ -100,7 +100,7 @@ class SyncEngine:
     # ------------------------------------------------------------------ #
     # local actions
     # ------------------------------------------------------------------ #
-    async def log_qso(
+    def record(
         self,
         *,
         call: str,
@@ -110,7 +110,11 @@ class SyncEngine:
         rst_sent: str = "599",
         rst_rcvd: str = "599",
     ) -> QSO:
-        """Create, store, and broadcast a new QSO."""
+        """Create + store a new QSO locally (synchronous, no network).
+
+        Returns immediately so the UI updates instantly; broadcast the result with
+        :meth:`broadcast` as a separate, best-effort step.
+        """
         qso = QSO(
             uuid=new_uuid(),
             station_id=self.station_id,
@@ -125,7 +129,16 @@ class SyncEngine:
         )
         self.log.apply(qso)
         self._notify(qso)
+        return qso
+
+    async def broadcast(self, qso: QSO) -> None:
+        """Send a previously-recorded QSO to peers."""
         await self.transport.send(QsoMessage(qso=qso))
+
+    async def log_qso(self, **kwargs) -> QSO:
+        """Record and broadcast a QSO (convenience for tests/headless callers)."""
+        qso = self.record(**kwargs)
+        await self.broadcast(qso)
         return qso
 
     async def send_heartbeat(self) -> None:

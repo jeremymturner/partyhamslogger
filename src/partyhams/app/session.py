@@ -88,7 +88,7 @@ class LogSession:
     # ------------------------------------------------------------------ #
     # logging
     # ------------------------------------------------------------------ #
-    async def log_qso(
+    def record_qso(
         self,
         *,
         call: str,
@@ -98,18 +98,26 @@ class LogSession:
         rst_sent: str | None = None,
         rst_rcvd: str = "599",
     ) -> QSO:
+        """Log a QSO locally and synchronously (UI updates immediately).
+
+        Returns the recorded QSO; broadcast it to peers with :meth:`broadcast`.
+        """
         if self.contest.exchanges_rst:
             rs, rr = rst_sent or default_rst(mode), rst_rcvd
         else:
             rs = rr = ""  # contests like Field Day exchange no signal report
-        return await self.engine.log_qso(
-            call=call,
-            freq_hz=freq_hz,
-            mode=mode,
-            exchange_rcvd=exchange,
-            rst_sent=rs,
-            rst_rcvd=rr,
+        return self.engine.record(
+            call=call, freq_hz=freq_hz, mode=mode, exchange_rcvd=exchange, rst_sent=rs, rst_rcvd=rr
         )
+
+    async def broadcast(self, qso: QSO) -> None:
+        await self.engine.broadcast(qso)
+
+    async def log_qso(self, **kwargs) -> QSO:
+        """Record + broadcast (convenience for tests/headless callers)."""
+        qso = self.record_qso(**kwargs)
+        await self.broadcast(qso)
+        return qso
 
     # ------------------------------------------------------------------ #
     # exchange parsing / validation

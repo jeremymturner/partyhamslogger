@@ -14,7 +14,7 @@ import asyncio
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QColor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -43,6 +43,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.session = session
         self._on_close = on_close
+        try:
+            self._loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self._loop = None  # no loop (e.g. tests) -> log locally, skip broadcast
         self.setWindowTitle(f"PartyHams Logger — {session.config.my_call} — {session.contest.name}")
         self.resize(900, 560)
 
@@ -214,27 +218,57 @@ class MainWindow(QMainWindow):
     def _try_log(self) -> None:
         call = self._call.text().strip().upper()
         if not call:
+            self._flash(self._call)
             self._call.setFocus()
+            self.statusBar().showMessage("Enter a callsign to log", 3000)
             return
         parsed = {name: e.text().strip().upper() for name, e in self._exchange_edits.items()}
         errors = self.session.validate_exchange(parsed)
         if errors:
-            self.statusBar().showMessage("  •  ".join(errors), 4000)
+            # Make the failure obvious: flash the first bad field and focus it.
+            self._highlight_invalid(parsed)
+            self.statusBar().showMessage("Not logged — " + " • ".join(errors), 5000)
             return
-        asyncio.ensure_future(self._do_log(call, parsed))
 
-    async def _do_log(self, call: str, exchange: dict[str, str]) -> None:
-        await self.session.log_qso(
-            call=call,
-            freq_hz=self._current_freq(),
-            mode=self._current_mode(),
-            exchange=exchange,
+        # Record locally and synchronously so the log updates instantly, then
+        # broadcast to peers as a best-effort side effect (offline = no-op).
+        qso = self.session.record_qso(
+            call=call, freq_hz=self._current_freq(), mode=self._current_mode(), exchange=parsed
         )
+        self._broadcast(qso)
+
         self._call.clear()
         for edit in self._exchange_edits.values():
             edit.clear()
         self._call.setFocus()
         self.statusBar().showMessage(f"Logged {call}", 2500)
+
+    def _broadcast(self, qso) -> None:
+        """Fire-and-forget network broadcast; the QSO is already logged locally."""
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return  # no running loop (offline/tests) -> local log is enough
+        try:
+            loop.create_task(self.session.broadcast(qso))
+        except Exception as exc:  # noqa: BLE001 - never block logging on the network
+            self.statusBar().showMessage(f"Logged (broadcast deferred: {exc})", 3000)
+
+    def _highlight_invalid(self, parsed: dict[str, str]) -> None:
+        focused = False
+        for field in self.session.contest.exchange_fields():
+            value = parsed.get(field.name, "")
+            ok = bool(value) and (field.validator is None or field.validator(value))
+            if (field.required and not value) or not ok:
+                edit = self._exchange_edits[field.name]
+                self._flash(edit)
+                if not focused:
+                    edit.setFocus()
+                    focused = True
+
+    def _flash(self, widget: QLineEdit) -> None:
+        """Briefly outline a field in red to signal a problem."""
+        widget.setStyleSheet(f"border: 1px solid {DUPE}; background-color: #3a2326;")
+        QTimer.singleShot(900, lambda: widget.setStyleSheet(""))
 
     # ------------------------------------------------------------------ #
     # refresh (fired by the session on any log change)
