@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import traceback
+from pathlib import Path
 
 
 def main() -> int:
@@ -17,7 +19,23 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    return run()
+
+    try:
+        return run()
+    except Exception:  # noqa: BLE001 - top-level crash reporter
+        report = traceback.format_exc()
+        log_path = Path.cwd() / "partyhams-error.log"
+        try:
+            log_path.write_text(report)
+        except OSError:
+            log_path = None
+        print("\n" + "=" * 70, file=sys.stderr)
+        print("PartyHams hit an error and had to stop. Please share this:", file=sys.stderr)
+        print("=" * 70, file=sys.stderr)
+        print(report, file=sys.stderr)
+        if log_path is not None:
+            print(f"(also saved to {log_path})", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

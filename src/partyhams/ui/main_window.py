@@ -11,10 +11,11 @@ field, Enter on the last field logs the QSO, clears, and refocuses the call.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QCloseEvent, QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -39,9 +40,10 @@ _LOG_COLUMNS = ["UTC", "Call", "Band", "Mode", "RST S", "RST R", "Exchange", "Op
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, session: LogSession) -> None:
+    def __init__(self, session: LogSession, on_close: Callable[[], None] | None = None) -> None:
         super().__init__()
         self.session = session
+        self._on_close = on_close
         self.setWindowTitle(f"PartyHams Logger — {session.config.my_call} — {session.contest.name}")
         self.resize(900, 560)
 
@@ -56,6 +58,12 @@ class MainWindow(QMainWindow):
         session.add_listener(self.refresh)
         self._call.setFocus()
         self.refresh()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        # Hand control back to the app loop for graceful async shutdown.
+        if self._on_close is not None:
+            self._on_close()
+        event.accept()
 
     # ------------------------------------------------------------------ #
     # construction

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QDialog
 
-from partyhams.app.session import build_session
+from partyhams.app.session import LogSession, build_session
 from partyhams.ui.main_window import MainWindow
 from partyhams.ui.start_dialog import StartDialog
 
@@ -24,20 +24,8 @@ def _db_path_for(call: str) -> str:
     return str(Path.cwd() / f"partyhams-{safe}.sqlite")
 
 
-def run() -> int:
-    """Launch the application. Returns the process exit code."""
-    import qasync
-
-    app = QApplication(sys.argv)
-    loop = qasync.QEventLoop(app)
-    asyncio.set_event_loop(loop)
-
-    dialog = StartDialog()
-    if dialog.exec() != QDialog.DialogCode.Accepted:
-        return 0
-    cfg = dialog.settings()
-
-    session = build_session(
+def _session_from_dialog(cfg: dict) -> LogSession:
+    return build_session(
         contest_id="arrl-field-day",
         my_call=cfg["my_call"],
         operator=cfg["operator"],
@@ -47,13 +35,35 @@ def run() -> int:
         db_path=_db_path_for(cfg["my_call"]),
     )
 
-    quit_event = asyncio.Event()
-    app.aboutToQuit.connect(quit_event.set)
 
-    with loop:
-        loop.run_until_complete(session.start())
-        window = MainWindow(session)
+def run() -> int:
+    """Launch the application. Returns the process exit code."""
+    import qasync
+
+    app = QApplication(sys.argv)
+    # Don't let the brief gap between the dialog closing and the main window
+    # showing trigger a quit; we drive shutdown explicitly from the window's
+    # close event so async cleanup runs while the loop is still alive.
+    app.setQuitOnLastWindowClosed(False)
+    loop = qasync.QEventLoop(app)
+    asyncio.set_event_loop(loop)
+
+    dialog = StartDialog()
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return 0
+    session = _session_from_dialog(dialog.settings())
+
+    close_event = asyncio.Event()
+
+    async def amain() -> None:
+        await session.start()
+        window = MainWindow(session, on_close=close_event.set)
         window.show()
-        loop.run_until_complete(quit_event.wait())
-        loop.run_until_complete(session.stop())
+        await close_event.wait()  # set when the user closes the window
+        await session.stop()  # loop still alive here -> clean cancellation
+        app.quit()
+
+    # A single run_until_complete owns the whole session lifetime.
+    with loop:
+        loop.run_until_complete(amain())
     return 0
