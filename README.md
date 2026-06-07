@@ -35,10 +35,14 @@ src/partyhams/
 tests/         # contest, sync convergence, session, and export tests
 ```
 
-Launch the logger with `make run` — a one-screen first-run dialog (call, class,
-section, power, optional network), then the keyboard-first entry window: type the
-call, Enter walks the exchange fields, Enter logs. Live score and dupe checking
-update as you go; **Export ADIF / Cabrillo** when you're done.
+Launch the logger with `make run`. On first launch it shows the **log-creation**
+screen — pick the activity (Field Day; others as they're added), enter your call /
+exchange / power and an optional network name. It then asks you to **select a
+radio** (Hamlib, FlexRadio, or None for manual band/mode). Both the current log
+and the radio choice are remembered (under `~/.partyhams/`), so the next launch
+reopens your log straight into the keyboard-first entry window: type the call,
+Enter walks the exchange fields, Enter logs. Live score and dupe checking update
+as you go; **Export ADIF / Cabrillo** when you're done.
 
 ## Getting started (dev)
 

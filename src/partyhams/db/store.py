@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS qso (
 );
 CREATE INDEX IF NOT EXISTS idx_qso_call ON qso(call);
 CREATE INDEX IF NOT EXISTS idx_qso_station ON qso(station_id);
+
+-- Log metadata (contest id, station config, etc.) so a log file is self-describing.
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -47,6 +53,22 @@ class SqliteLog:
 
     def close(self) -> None:
         self._conn.close()
+
+    # --- log metadata (key/value) ---
+    def set_meta(self, key: str, value: str) -> None:
+        self._conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+        self._conn.commit()
+
+    def get_meta(self, key: str, default: str | None = None) -> str | None:
+        row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row is not None else default
+
+    def all_meta(self) -> dict[str, str]:
+        return {r["key"]: r["value"] for r in self._conn.execute("SELECT key, value FROM meta")}
 
     def upsert(self, qso: QSO) -> bool:
         """Insert or update under last-writer-wins. Returns True if state changed."""

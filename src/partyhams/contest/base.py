@@ -26,6 +26,20 @@ class ExchangeField:
     validator: Callable[[str], bool] | None = None
 
 
+@dataclass(frozen=True)
+class ConfigField:
+    """A per-station setup field for the log-creation screen beyond the exchange.
+
+    ``choices`` of ``(label, value)`` pairs renders a dropdown; ``None`` is a text
+    field. Collected into :attr:`ContestConfig.extra` (e.g. Field Day power).
+    """
+
+    name: str
+    label: str
+    choices: tuple[tuple[str, str], ...] | None = None
+    default: str = ""
+
+
 @dataclass
 class ContestConfig:
     """Per-station, per-event settings the operator fills in before logging.
@@ -66,7 +80,15 @@ class ContestDefinition(ABC):
     #: UI label for this contest's multipliers (e.g. "Zones", "Sections").
     mult_label: str = "Mults"
 
-    # --- exchange ---
+    # --- setup / exchange ---
+    def config_fields(self) -> list[ConfigField]:
+        """Extra per-station setup fields for the log-creation screen.
+
+        Default: none. Field Day adds a power category here. The operator's own
+        exchange (e.g. class/section) comes from :meth:`exchange_fields`.
+        """
+        return []
+
     @abstractmethod
     def exchange_fields(self) -> list[ExchangeField]:
         """Ordered received-exchange fields (excludes RST, which is universal)."""

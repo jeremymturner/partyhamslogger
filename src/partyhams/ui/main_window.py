@@ -51,15 +51,17 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.session = session
         self._on_close = on_close
+        #: Set by the app to a no-arg callback that re-runs the radio screen.
+        self.on_change_radio: Callable[[], None] | None = None
         try:
             self._loop = asyncio.get_event_loop()
         except RuntimeError:
             self._loop = None  # no loop (e.g. tests) -> log locally, skip broadcast
 
-        # CAT state. When a radio poller is present, band/mode/frequency follow the
-        # rig and the manual combos become read-only mirrors.
-        self._poller = radio_poller
-        self._cat = radio_poller is not None
+        # CAT state (managed via set_poller). When a poller is present, band/mode/
+        # frequency follow the rig and the manual combos become read-only mirrors.
+        self._poller: RadioPoller | None = None
+        self._cat = False
         self._radio_freq: int | None = None
         self._radio_mode: Mode | None = None
         self._radio_connected = False
@@ -73,6 +75,7 @@ class MainWindow(QMainWindow):
             self._columns += ["RST S", "RST R"]
         self._columns += ["Exchange", "Op"]
 
+        self._build_menu()
         root = QWidget()
         layout = QVBoxLayout(root)
         layout.addWidget(self._build_score_bar())
@@ -82,19 +85,34 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         session.add_listener(self.refresh)
-
-        if self._cat and self._poller is not None:
-            # The rig drives band/mode; show them but don't let them be edited.
-            self._band.setEnabled(False)
-            self._mode.setEnabled(False)
-            self._poller.on_state = self._on_radio_state
-            self._poller.on_status = self._on_radio_status
-            self._radio_connected = self._poller.connected
-            if self._poller.state is not None:
-                self._apply_radio_state(self._poller.state)
-
+        self.set_poller(radio_poller)
         self._call.setFocus()
         self.refresh()
+
+    def _build_menu(self) -> None:
+        radio_menu = self.menuBar().addMenu("Radio")
+        action = radio_menu.addAction("Select Radio…")
+        action.triggered.connect(self._radio_menu_clicked)
+
+    def _radio_menu_clicked(self) -> None:
+        if self.on_change_radio is not None:
+            self.on_change_radio()
+
+    def set_poller(self, poller: RadioPoller | None) -> None:
+        """Attach (or detach) a radio poller and rewire CAT state live."""
+        self._poller = poller
+        self._cat = poller is not None
+        self._radio_freq = None
+        self._radio_mode = None
+        self._radio_connected = poller.connected if poller is not None else False
+        self._band.setEnabled(not self._cat)
+        self._mode.setEnabled(not self._cat)
+        if poller is not None:
+            poller.on_state = self._on_radio_state
+            poller.on_status = self._on_radio_status
+            if poller.state is not None:
+                self._apply_radio_state(poller.state)
+        self._refresh_indicators()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         # Hand control back to the app loop for graceful async shutdown.

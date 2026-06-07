@@ -19,7 +19,13 @@ import enum
 import re
 from collections.abc import Iterable
 
-from partyhams.contest.base import ContestConfig, ContestDefinition, ExchangeField, ScoreSummary
+from partyhams.contest.base import (
+    ConfigField,
+    ContestConfig,
+    ContestDefinition,
+    ExchangeField,
+    ScoreSummary,
+)
 from partyhams.contest.registry import register
 from partyhams.contest.sections import is_valid_section
 from partyhams.core.models import QSO, ModeGroup
@@ -79,6 +85,20 @@ class FieldDay(ContestDefinition):
     cabrillo_name = "ARRL-FD"
     exchanges_rst = False  # Field Day exchange is class + section only — no RST
     mult_label = "Sections"
+
+    def config_fields(self) -> list[ConfigField]:
+        return [
+            ConfigField(
+                "power",
+                "Power",
+                choices=(
+                    ("Low — ≤150 W (×2)", PowerCategory.LOW_150W.key),
+                    ("QRP — ≤5 W, alt power (×5)", PowerCategory.QRP_5W_ALT.key),
+                    ("High — >150 W (×1)", PowerCategory.HIGH.key),
+                ),
+                default=PowerCategory.LOW_150W.key,
+            ),
+        ]
 
     def exchange_fields(self) -> list[ExchangeField]:
         return [

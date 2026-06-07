@@ -1,59 +1,87 @@
-"""Qt application bootstrap.
+"""Qt application bootstrap and startup flow.
 
-Shows the first-run dialog, builds a :class:`~partyhams.app.session.LogSession`
-from the answers, and runs the main window on an asyncio event loop bridged to Qt
-via :mod:`qasync` (so the entry window can ``await`` the sync engine directly).
+On launch:
+  1. If a *current log* is remembered, reopen it straight into the logging window.
+  2. Otherwise show the log-creation screen (activity type + station setup).
+  3. Once a log exists, if no radio has been configured, show the radio screen.
+The current-log pointer and radio choice persist (``app/state.py``), so a normal
+restart resumes silently. The asyncio loop is bridged to Qt via qasync.
 """
 
 from __future__ import annotations
 
 import asyncio
-import re
+import contextlib
 import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QDialog
 
 from partyhams.app.radio import RadioPoller
-from partyhams.app.session import LogSession, build_session
+from partyhams.app.session import LogSession, build_session, open_session
+from partyhams.app.state import AppState, load_state, new_log_path, save_state
 from partyhams.radio.flex import FlexRadio
 from partyhams.radio.hamlib import HamlibRadio
+from partyhams.ui.log_dialog import LogDialog
 from partyhams.ui.main_window import MainWindow
-from partyhams.ui.start_dialog import StartDialog
+from partyhams.ui.radio_dialog import RadioDialog
 from partyhams.ui.style import apply_theme
 
 
-def _db_path_for(call: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9]+", "_", call) or "station"
-    return str(Path.cwd() / f"partyhams-{safe}.sqlite")
-
-
-def _build_poller(cfg: dict) -> RadioPoller | None:
-    """Build a RadioPoller for the chosen backend, or None for manual entry."""
-    kind = cfg.get("radio", "none")
-    if kind == "none":
+def _poller_from_radio(radio: dict | None) -> RadioPoller | None:
+    """Build a RadioPoller from a saved radio choice, or None for manual."""
+    if not radio:
         return None
-    host, _, port_str = cfg.get("rig_conn", "").partition(":")
+    kind = radio.get("kind", "none")
+    host, _, port_str = radio.get("conn", "").partition(":")
     host = host.strip() or None
     port = int(port_str) if port_str.strip().isdigit() else None
     if kind == "hamlib":
         return RadioPoller(HamlibRadio(host or "127.0.0.1", port or 4532))
     if kind == "flex":
-        # host=None -> auto-discover on the LAN.
-        return RadioPoller(FlexRadio(host, port or 4992))
+        return RadioPoller(FlexRadio(host, port or 4992))  # host=None -> discover
     return None
 
 
-def _session_from_dialog(cfg: dict) -> LogSession:
-    return build_session(
-        contest_id="arrl-field-day",
+def _session_from_log_dialog(cfg: dict) -> tuple[LogSession, str]:
+    db_path = new_log_path(cfg["contest_id"], cfg["my_call"])
+    session = build_session(
+        contest_id=cfg["contest_id"],
         my_call=cfg["my_call"],
         operator=cfg["operator"],
-        sent_exchange={"class": cfg["fd_class"], "section": cfg["section"]},
-        power=cfg["power"],
+        sent_exchange=cfg["sent_exchange"],
         network=cfg["network"] or None,
-        db_path=_db_path_for(cfg["my_call"]),
+        extra=cfg["extra"],
+        db_path=db_path,
     )
+    return session, db_path
+
+
+def _open_or_create_log(state: AppState) -> LogSession | None:
+    """Reopen the remembered log, or run the creation screen. None if cancelled."""
+    if state.current_log and Path(state.current_log).exists():
+        with contextlib.suppress(Exception):
+            return open_session(state.current_log)  # fall through if corrupt/old
+
+    dialog = LogDialog()
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    session, db_path = _session_from_log_dialog(dialog.settings())
+    state.current_log = db_path
+    save_state(state)
+    return session
+
+
+async def _start_poller(poller: RadioPoller | None, window: MainWindow) -> RadioPoller | None:
+    """Start a poller, falling back to manual entry if the radio isn't reachable."""
+    if poller is None:
+        return None
+    try:
+        await poller.start()
+    except Exception as exc:  # noqa: BLE001
+        window.statusBar().showMessage(f"Radio not reachable, manual mode: {exc}", 5000)
+        return None
+    return poller
 
 
 def run() -> int:
@@ -62,41 +90,53 @@ def run() -> int:
 
     app = QApplication(sys.argv)
     apply_theme(app)
-    # Don't let the brief gap between the dialog closing and the main window
-    # showing trigger a quit; we drive shutdown explicitly from the window's
-    # close event so async cleanup runs while the loop is still alive.
     app.setQuitOnLastWindowClosed(False)
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
-    dialog = StartDialog()
-    if dialog.exec() != QDialog.DialogCode.Accepted:
+    state = load_state()
+    session = _open_or_create_log(state)
+    if session is None:
         return 0
-    cfg = dialog.settings()
-    session = _session_from_dialog(cfg)
+
+    # Prompt for a radio only if the choice hasn't been made yet.
+    if state.radio is None:
+        rdlg = RadioDialog()
+        if rdlg.exec() == QDialog.DialogCode.Accepted:
+            state.radio = rdlg.settings()
+            save_state(state)
 
     close_event = asyncio.Event()
-
-    poller = _build_poller(cfg)
+    holder: dict[str, RadioPoller | None] = {"poller": _poller_from_radio(state.radio)}
 
     async def amain() -> None:
         await session.start()
-        active_poller = poller
-        if active_poller is not None:
-            try:
-                await active_poller.start()
-            except Exception as exc:  # noqa: BLE001 - fall back to manual entry
-                print(f"Radio (rigctld) not reachable, continuing in manual mode: {exc}")
-                active_poller = None
-        window = MainWindow(session, on_close=close_event.set, radio_poller=active_poller)
+        window = MainWindow(session, on_close=close_event.set)
+        holder["poller"] = await _start_poller(holder["poller"], window)
+        window.set_poller(holder["poller"])
+        window.on_change_radio = lambda: _request_radio_change(window)
         window.show()
-        await close_event.wait()  # set when the user closes the window
-        if active_poller is not None:
-            await active_poller.stop()
-        await session.stop()  # loop still alive here -> clean cancellation
+        await close_event.wait()
+        if holder["poller"] is not None:
+            await holder["poller"].stop()
+        await session.stop()
         app.quit()
 
-    # A single run_until_complete owns the whole session lifetime.
+    def _request_radio_change(window: MainWindow) -> None:
+        if loop.is_running():
+            loop.create_task(_change_radio(window))
+
+    async def _change_radio(window: MainWindow) -> None:
+        dialog = RadioDialog(current=state.radio)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        state.radio = dialog.settings()
+        save_state(state)
+        if holder["poller"] is not None:
+            await holder["poller"].stop()
+        holder["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
+        window.set_poller(holder["poller"])
+
     with loop:
         loop.run_until_complete(amain())
     return 0

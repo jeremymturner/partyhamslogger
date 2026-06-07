@@ -11,6 +11,7 @@ Qt-free on purpose, so it's fully unit-testable.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -202,29 +203,76 @@ class LogSession:
         )
 
 
-def build_session(
-    *,
-    contest_id: str,
-    my_call: str,
-    sent_exchange: dict[str, str],
-    power: str,
+def _assemble(
+    contest: ContestDefinition,
+    config: ContestConfig,
+    operator: str | None,
     network: str | None,
-    operator: str | None = None,
-    db_path: str | Path = ":memory:",
-    bonus_points: int = 0,
+    store: SqliteLog,
 ) -> LogSession:
-    """Construct a fully-wired session. ``network`` blank/None => offline."""
-    contest = get_contest(contest_id)
-    config = ContestConfig(
-        my_call=my_call,
-        sent_exchange=sent_exchange,
-        extra={"power": power, "bonus_points": bonus_points},
-    )
-    store = SqliteLog(db_path)
     station_id = new_station_id()
     if network:
         transport: NullTransport | MulticastTransport = MulticastTransport(network, station_id)
     else:
         transport = NullTransport("offline", station_id)
-    engine = SyncEngine(transport, operator=operator or my_call, call=my_call)
+    engine = SyncEngine(transport, operator=operator or config.my_call, call=config.my_call)
     return LogSession(contest=contest, config=config, engine=engine, store=store)
+
+
+def _write_meta(
+    store: SqliteLog,
+    contest_id: str,
+    config: ContestConfig,
+    operator: str | None,
+    network: str | None,
+) -> None:
+    store.set_meta("contest_id", contest_id)
+    store.set_meta("my_call", config.my_call)
+    store.set_meta("operator", operator or config.my_call)
+    store.set_meta("network", network or "")
+    store.set_meta("sent_exchange", json.dumps(config.sent_exchange))
+    store.set_meta("extra", json.dumps(config.extra))
+
+
+def build_session(
+    *,
+    contest_id: str,
+    my_call: str,
+    sent_exchange: dict[str, str],
+    network: str | None,
+    operator: str | None = None,
+    power: str = "low_150w",
+    bonus_points: int = 0,
+    extra: dict[str, object] | None = None,
+    db_path: str | Path = ":memory:",
+) -> LogSession:
+    """Create a new log + session and persist its config into the log file.
+
+    ``network`` blank/None => offline. ``extra`` (e.g. from a contest's
+    ``config_fields``) is merged over the power/bonus defaults.
+    """
+    contest = get_contest(contest_id)
+    merged_extra: dict[str, object] = {"power": power, "bonus_points": bonus_points}
+    if extra:
+        merged_extra.update(extra)
+    config = ContestConfig(my_call=my_call, sent_exchange=sent_exchange, extra=merged_extra)
+    store = SqliteLog(db_path)
+    _write_meta(store, contest_id, config, operator, network)
+    return _assemble(contest, config, operator, network, store)
+
+
+def open_session(db_path: str | Path) -> LogSession:
+    """Reopen an existing log file, restoring its contest + station config."""
+    store = SqliteLog(db_path)
+    meta = store.all_meta()
+    if "contest_id" not in meta:
+        raise ValueError(f"{db_path} is not a PartyHams log (no metadata)")
+    contest = get_contest(meta["contest_id"])
+    config = ContestConfig(
+        my_call=meta.get("my_call", ""),
+        sent_exchange=json.loads(meta.get("sent_exchange", "{}")),
+        extra=json.loads(meta.get("extra", "{}")),
+    )
+    operator = meta.get("operator") or config.my_call
+    network = meta.get("network") or None
+    return _assemble(contest, config, operator, network, store)
