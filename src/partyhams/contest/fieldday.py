@@ -76,6 +76,7 @@ def is_valid_class(value: str) -> bool:
 class FieldDay(ContestDefinition):
     id = "arrl-field-day"
     name = "ARRL Field Day"
+    cabrillo_name = "ARRL-FD"
 
     def exchange_fields(self) -> list[ExchangeField]:
         return [

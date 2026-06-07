@@ -59,6 +59,8 @@ class ContestDefinition(ABC):
     id: str = ""
     #: Human-readable name shown in the UI.
     name: str = ""
+    #: Cabrillo ``CONTEST:`` identifier, e.g. ``"ARRL-FD"``.
+    cabrillo_name: str = ""
 
     # --- exchange ---
     @abstractmethod

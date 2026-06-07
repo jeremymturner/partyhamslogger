@@ -17,6 +17,7 @@ runs the real background receive + heartbeat loops.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from partyhams.core.clock import LamportClock, new_uuid
 from partyhams.core.models import QSO, Mode
@@ -41,6 +42,7 @@ class SyncEngine:
         call: str,
         log: LogMerge | None = None,
         heartbeat_interval: float = HEARTBEAT_INTERVAL_S,
+        on_qso: Callable[[QSO], None] | None = None,
     ) -> None:
         self.transport = transport
         self.station_id = transport.station_id
@@ -49,10 +51,17 @@ class SyncEngine:
         self.log = log if log is not None else LogMerge()
         self.clock = LamportClock()
         self.heartbeat_interval = heartbeat_interval
+        # Fired whenever a QSO is applied locally or from a peer (state changed).
+        # The app layer uses this to persist + refresh the UI.
+        self.on_qso = on_qso
         # station_id -> operator label, for the "who's on" view.
         self.peers: dict[str, str] = {}
         self._tasks: list[asyncio.Task] = []
         self._running = False
+
+    def _notify(self, qso: QSO) -> None:
+        if self.on_qso is not None:
+            self.on_qso(qso)
 
     # ------------------------------------------------------------------ #
     # lifecycle
@@ -115,6 +124,7 @@ class SyncEngine:
             exchange_rcvd=exchange_rcvd or {},
         )
         self.log.apply(qso)
+        self._notify(qso)
         await self.transport.send(QsoMessage(qso=qso))
         return qso
 
@@ -154,7 +164,8 @@ class SyncEngine:
 
         if isinstance(message, QsoMessage):
             self.clock.update(message.qso.lamport)
-            self.log.apply(message.qso)
+            if self.log.apply(message.qso):
+                self._notify(message.qso)
 
         elif isinstance(message, Hello):
             self.peers[sender] = message.call or message.operator or sender
@@ -167,7 +178,8 @@ class SyncEngine:
         elif isinstance(message, SyncResponse):
             for qso in message.qsos:
                 self.clock.update(qso.lamport)
-                self.log.apply(qso)
+                if self.log.apply(qso):
+                    self._notify(qso)
 
         elif isinstance(message, Heartbeat):
             self.clock.update(message.lamport_max)

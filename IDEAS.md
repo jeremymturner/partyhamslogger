@@ -307,10 +307,16 @@ operator** · test gear = **Flex 6500, IC-705, IC-7610 (remote), FT-891** · bui
     sync-responses, and full version-vector anti-entropy for cross-station edits.
   - Hamlib CAT spike: connect, read freq/mode, send CW over CAT (macOS).
   - PySide6 entry-window prototype: keyboard-first QSO entry feel.
-- **Phase 1 — MVP:** Contest-capable **networked** logger — fast entry, cross-station
-  dupes, **ARRL Field Day** module (class+section, mode-group dupes, power mult, score),
-  Hamlib + Flex + Icom CAT, CW(CAT)+voice macros, P2P shared log over LAN, ADIF + Cabrillo,
-  first-run wizard. Tested on macOS, then Windows/Linux.
+- **Phase 1 — MVP (in progress):**
+  - ✅ **Logging core + entry window — DONE.** `LogSession` controller
+    (`app/session.py`) ties contest + P2P sync + SQLite + dupe/score/export; the
+    PySide6 entry window (`ui/`) is keyboard-first, builds its exchange fields from
+    the contest schema, shows live score + DUPE indicator, and lists the log
+    (peer QSOs coloured). Field Day fully wired; **ADIF + Cabrillo export** done;
+    first-run dialog done; offline *and* networked (multicast) modes.
+  - ⏳ **Remaining:** live CAT auto-fill of band/mode/freq (Hamlib first, then Flex
+    + Icom CI-V drivers), CW(CAT)+voice F-key macros, and on-the-air testing
+    across macOS/Windows/Linux.
 - **Phase 2:** Module #2 (mult-heavy: CQ WW or WPX) to validate the multiplier engine,
   band map + DX cluster, rate meters, run/S&P macro sets, SO2R/SO2V, N1MM UDP interop.
 - **Phase 3:** Digital integration (WSJT-X/fldigi), QRZ/CTY lookups, awards tracking,

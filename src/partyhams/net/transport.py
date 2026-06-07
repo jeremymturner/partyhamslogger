@@ -50,6 +50,24 @@ class Transport(ABC):
         """Stop receiving and release resources."""
 
 
+class NullTransport(Transport):
+    """A no-op transport for offline / single-station operation.
+
+    Lets the app always run through a :class:`~partyhams.net.engine.SyncEngine`
+    (uniform code path) even when there's no network — sends go nowhere and the
+    inbox never fills.
+    """
+
+    async def start(self) -> None:
+        pass
+
+    async def send(self, message: Message) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+
 class MulticastTransport(Transport):
     """Real LAN transport over UDP multicast.
 

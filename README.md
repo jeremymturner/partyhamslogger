@@ -28,10 +28,17 @@ src/partyhams/
 ├── db/        # SQLite store (one log per station)
 ├── contest/   # pluggable contest engine + ARRL Field Day module
 ├── radio/     # radio abstraction + Hamlib / Flex / Icom CI-V backends
-├── net/       # peer-to-peer UDP sync protocol + engine
-└── ui/        # PySide6 entry / log / band-map windows
-tests/         # contest scoring, dupe, and sync-protocol tests
+├── net/       # peer-to-peer UDP multicast sync (protocol + engine)
+├── export/    # ADIF + Cabrillo writers
+├── app/       # LogSession controller (Qt-free; the UI binds to this)
+└── ui/        # PySide6 entry / log / score windows + first-run dialog
+tests/         # contest, sync convergence, session, and export tests
 ```
+
+Launch the logger with `make run` — a one-screen first-run dialog (call, class,
+section, power, optional network), then the keyboard-first entry window: type the
+call, Enter walks the exchange fields, Enter logs. Live score and dupe checking
+update as you go; **Export ADIF / Cabrillo** when you're done.
 
 ## Getting started (dev)
 
