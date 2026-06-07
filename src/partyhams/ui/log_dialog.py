@@ -24,8 +24,8 @@ from partyhams.ui.widgets import make_upper
 
 
 class LogDialog(QDialog):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
         self.setWindowTitle("PartyHams Logger — New Log")
         self.setMinimumWidth(380)
 

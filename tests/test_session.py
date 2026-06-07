@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from partyhams.app.session import build_session
+from partyhams.app.session import build_session, list_logs
 from partyhams.core.models import Mode
 
 FREQ_20M = 14_040_000
@@ -124,6 +124,38 @@ async def test_listener_fires_on_log():
         call="K1A", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1A", "section": "OR"}
     )
     assert hits == [1]
+
+
+async def test_list_logs_summarizes_each_file(tmp_path):
+    s1 = build_session(
+        contest_id="arrl-field-day",
+        my_call="W7ABC",
+        sent_exchange={"class": "1E", "section": "OR"},
+        network=None,
+        db_path=tmp_path / "fd.sqlite",
+    )
+    await s1.log_qso(
+        call="K1A", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1A", "section": "OR"}
+    )
+    build_session(
+        contest_id="arrl-field-day",
+        my_call="N0AW",
+        sent_exchange={"class": "2A", "section": "EPA"},
+        network=None,
+        db_path=tmp_path / "other.sqlite",
+    )
+
+    logs = list_logs(tmp_path)
+    by_call = {entry["call"]: entry for entry in logs}
+    assert set(by_call) == {"W7ABC", "N0AW"}
+    assert by_call["W7ABC"]["qsos"] == 1
+    assert by_call["N0AW"]["qsos"] == 0
+    assert "Field Day" in by_call["W7ABC"]["contest"]
+    assert by_call["W7ABC"]["path"].endswith("fd.sqlite")
+
+
+async def test_list_logs_missing_dir_is_empty(tmp_path):
+    assert list_logs(tmp_path / "nope") == []
 
 
 async def test_reload_from_disk(tmp_path):

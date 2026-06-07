@@ -26,6 +26,7 @@ from partyhams.radio.hamlib import HamlibRadio
 from partyhams.radio.icom_civ import IcomCIV
 from partyhams.ui.log_dialog import LogDialog
 from partyhams.ui.main_window import MainWindow
+from partyhams.ui.open_log_dialog import OpenLogDialog
 from partyhams.ui.radio_dialog import RadioDialog
 from partyhams.ui.style import app_icon, apply_theme
 
@@ -162,27 +163,80 @@ def run() -> int:
             save_state(state)
 
     close_event = asyncio.Event()
-    holder: dict[str, RadioPoller | None] = {"poller": _poller_from_radio(state.radio)}
+    # ctx carries the live state across the window loop: the session in use, the
+    # next one to switch to (set by New/Open Log), and the shared radio poller.
+    ctx: dict = {"session": session, "next": None, "poller": None}
 
     async def amain() -> None:
-        await session.start()
-        window = MainWindow(session, on_close=close_event.set)
-        holder["poller"] = await _start_poller(holder["poller"], window)
-        window.set_poller(holder["poller"])
-        window.on_change_radio = lambda: _request_radio_change(window)
-        window.show()
-        await close_event.wait()
-        if holder["poller"] is not None:
-            await holder["poller"].stop()
-        await session.stop()
+        while ctx["session"] is not None:
+            active = ctx["session"]
+            await active.start()
+            window = MainWindow(active, on_close=close_event.set)
+            window.on_change_radio = lambda w=window: _request_radio_change(w)
+            window.on_new_log = lambda w=window: _new_log_flow(w)
+            window.on_open_log = lambda w=window: _open_log_flow(w)
+            window.show()
+            ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
+            window.set_poller(ctx["poller"])
+
+            await close_event.wait()  # window closed, or a log switch was requested
+            close_event.clear()
+
+            if ctx["poller"] is not None:
+                await ctx["poller"].stop()
+                ctx["poller"] = None
+            await active.stop()
+            window._on_close = None  # don't re-fire close_event during teardown
+            if window._sections_window is not None:
+                window._sections_window.close()
+            window.close()
+            window.deleteLater()
+
+            ctx["session"], ctx["next"] = ctx["next"], None
         app.quit()
 
+    # --- log switching (New / Open) ---
+    def _new_log_flow(window: MainWindow) -> None:
+        dialog = LogDialog(parent=window)
+        window._log_dialog = dialog
+        dialog.finished.connect(lambda result: _new_log_done(dialog, result))
+        dialog.open()
+
+    def _new_log_done(dialog: LogDialog, result: int) -> None:
+        if result == QDialog.DialogCode.Accepted.value:
+            new_session, db_path = _session_from_log_dialog(dialog.settings())
+            state.current_log = db_path
+            save_state(state)
+            _switch_to(new_session)
+
+    def _open_log_flow(window: MainWindow) -> None:
+        dialog = OpenLogDialog(parent=window)
+        window._log_dialog = dialog
+        dialog.finished.connect(lambda result: _open_log_done(dialog, result))
+        dialog.open()
+
+    def _open_log_done(dialog: OpenLogDialog, result: int) -> None:
+        path = dialog.selected_path()
+        if result != QDialog.DialogCode.Accepted.value or not path:
+            return
+        try:
+            new_session = open_session(path)
+        except Exception:  # noqa: BLE001 - unreadable/foreign file; ignore
+            return
+        state.current_log = path
+        save_state(state)
+        _switch_to(new_session)
+
+    def _switch_to(new_session: LogSession) -> None:
+        ctx["next"] = new_session
+        close_event.set()  # ends the current window's wait; the loop rebuilds
+
+    # --- radio change (live) ---
     def _request_radio_change(window: MainWindow) -> None:
-        # Show the dialog NON-blocking (open(), not exec()) so we never spin a
-        # nested event loop inside a running task — that re-enters the asyncio
-        # scheduler and crashes qasync. The async swap is scheduled on `finished`.
+        # Non-blocking (open() + finished) so we never spin a nested event loop
+        # inside a running task — that re-enters the asyncio scheduler.
         dialog = RadioDialog(current=state.radio, parent=window)
-        window._radio_dialog = dialog  # keep a reference alive while open
+        window._radio_dialog = dialog
         dialog.finished.connect(lambda result: _on_radio_dialog_done(window, dialog, result))
         dialog.open()
 
@@ -194,10 +248,10 @@ def run() -> int:
             loop.create_task(_apply_radio(window))
 
     async def _apply_radio(window: MainWindow) -> None:
-        if holder["poller"] is not None:
-            await holder["poller"].stop()
-        holder["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
-        window.set_poller(holder["poller"])
+        if ctx["poller"] is not None:
+            await ctx["poller"].stop()
+        ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
+        window.set_poller(ctx["poller"])
 
     with loop:
         loop.run_until_complete(amain())

@@ -64,9 +64,12 @@ class MainWindow(QMainWindow):
         self._esm = False  # ESM: Enter sends the next message
         self._esm_sent = False  # have we sent our exchange/call this QSO?
         self._sections_window: SectionsWindow | None = None
-        #: Set by the app to a no-arg callback that re-runs the radio screen.
+        #: Set by the app to no-arg callbacks that switch radio / log.
         self.on_change_radio: Callable[[], None] | None = None
+        self.on_new_log: Callable[[], None] | None = None
+        self.on_open_log: Callable[[], None] | None = None
         self._radio_dialog = None  # app keeps the open radio dialog alive here
+        self._log_dialog = None  # app keeps the open new/open-log dialog alive here
         try:
             self._loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -361,6 +364,9 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("File")
+        file_menu.addAction("New Log…", lambda: self.on_new_log and self.on_new_log())
+        file_menu.addAction("Open Log…", lambda: self.on_open_log and self.on_open_log())
+        file_menu.addSeparator()
         file_menu.addAction("Export ADIF…", self._export_adif)
         file_menu.addAction("Export Cabrillo…", self._export_cabrillo)
 

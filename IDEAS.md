@@ -245,6 +245,10 @@ Legend: `[MVP]` first release · `[v1]` 1.0 · `[later]` post-1.0
 - ✅ **Sections worked window — DONE.** All ARRL/RAC sections grouped by call
   district (0–9, VE, DX), worked/needed, with Band + Mode filters for
   band / mode / band+mode views (View → Sections Worked).
+- ✅ **Multiple logs — DONE.** File → New Log / Open Log switches the active log at
+  runtime (rebuilds the window for that log's contest); the Open Log chooser lists
+  every saved log with its activity, call, QSO count, and last-modified time. The
+  radio stays connected across switches; the last-used log reopens on launch.
 - [v1] More contest modules, rate meters, goals
 - [v1] Run/S&P macro sets
 
