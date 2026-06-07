@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QDialog
 
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, build_session
+from partyhams.radio.flex import FlexRadio
 from partyhams.radio.hamlib import HamlibRadio
 from partyhams.ui.main_window import MainWindow
 from partyhams.ui.start_dialog import StartDialog
@@ -25,6 +26,22 @@ from partyhams.ui.style import apply_theme
 def _db_path_for(call: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9]+", "_", call) or "station"
     return str(Path.cwd() / f"partyhams-{safe}.sqlite")
+
+
+def _build_poller(cfg: dict) -> RadioPoller | None:
+    """Build a RadioPoller for the chosen backend, or None for manual entry."""
+    kind = cfg.get("radio", "none")
+    if kind == "none":
+        return None
+    host, _, port_str = cfg.get("rig_conn", "").partition(":")
+    host = host.strip() or None
+    port = int(port_str) if port_str.strip().isdigit() else None
+    if kind == "hamlib":
+        return RadioPoller(HamlibRadio(host or "127.0.0.1", port or 4532))
+    if kind == "flex":
+        # host=None -> auto-discover on the LAN.
+        return RadioPoller(FlexRadio(host, port or 4992))
+    return None
 
 
 def _session_from_dialog(cfg: dict) -> LogSession:
@@ -60,9 +77,7 @@ def run() -> int:
 
     close_event = asyncio.Event()
 
-    poller: RadioPoller | None = None
-    if cfg.get("radio") == "hamlib":
-        poller = RadioPoller(HamlibRadio(cfg["rig_host"], cfg["rig_port"]))
+    poller = _build_poller(cfg)
 
     async def amain() -> None:
         await session.start()

@@ -48,12 +48,10 @@ class StartDialog(QDialog):
         self._radio = QComboBox()
         self._radio.addItem("None — manual band/mode", "none")
         self._radio.addItem("Hamlib (rigctld)", "hamlib")
-        self._rig_conn = QLineEdit("127.0.0.1:4532")
-        self._rig_conn.setPlaceholderText("rigctld host:port")
+        self._radio.addItem("FlexRadio (native)", "flex")
+        self._rig_conn = QLineEdit()
         self._rig_conn.setEnabled(False)
-        self._radio.currentIndexChanged.connect(
-            lambda _i: self._rig_conn.setEnabled(self._radio.currentData() == "hamlib")
-        )
+        self._radio.currentIndexChanged.connect(lambda _i: self._on_radio_changed())
 
         # Callsign/class/section/operator are upper case; network name is free-form.
         make_upper(self._call, self._class, self._section, self._operator)
@@ -75,6 +73,16 @@ class StartDialog(QDialog):
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
 
+    def _on_radio_changed(self) -> None:
+        kind = self._radio.currentData()
+        self._rig_conn.setEnabled(kind != "none")
+        if kind == "hamlib":
+            self._rig_conn.setPlaceholderText("rigctld host:port (default 127.0.0.1:4532)")
+        elif kind == "flex":
+            self._rig_conn.setPlaceholderText("radio IP (blank = auto-discover)")
+        else:
+            self._rig_conn.setPlaceholderText("")
+
     def _on_accept(self) -> None:
         if not self._call.text().strip():
             self._call.setFocus()
@@ -83,7 +91,6 @@ class StartDialog(QDialog):
 
     def settings(self) -> dict:
         call = self._call.text().strip().upper()
-        host, _, port = self._rig_conn.text().strip().partition(":")
         return {
             "my_call": call,
             "operator": (self._operator.text().strip().upper() or call),
@@ -92,6 +99,5 @@ class StartDialog(QDialog):
             "power": _POWER_OPTIONS[self._power.currentIndex()][1],
             "network": self._network.text().strip(),
             "radio": self._radio.currentData(),
-            "rig_host": host or "127.0.0.1",
-            "rig_port": int(port) if port.isdigit() else 4532,
+            "rig_conn": self._rig_conn.text().strip(),  # parsed per-backend in app.py
         }
