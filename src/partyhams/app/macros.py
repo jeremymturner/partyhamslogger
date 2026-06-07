@@ -47,6 +47,50 @@ def expand(template: str, context: dict[str, str]) -> tuple[str, list[str]]:
     return text, actions
 
 
+def bank_key(mode_group: str, run: bool) -> str:
+    """Macro bank id for a mode group + Run/S&P, e.g. ``"CW.RUN"`` / ``"PHONE.SP"``."""
+    return f"{mode_group}.{'RUN' if run else 'SP'}"
+
+
+@dataclass
+class ESMStep:
+    """What the Enter key should do next under ESM (Enter Sends Messages).
+
+    ``key`` is the F-key to fire (None = just focus the call field); the flags
+    drive the surrounding UI actions.
+    """
+
+    key: int | None
+    set_sent: bool = False  # mark "we've sent our exchange/call" for this QSO
+    reset: bool = False  # QSO finished -> clear the sent flag
+    log: bool = False  # log the QSO after firing the key
+    focus_exchange: bool = False  # move to the first empty exchange field
+
+
+def esm_step(run: bool, call_present: bool, esm_sent: bool, exch_complete: bool) -> ESMStep:
+    """Map the current entry state to the next ESM action (N1MM-style).
+
+    Run:  CQ (F1) → send exchange (F2) → TU + log (F3).
+    S&P:  send my call (F4) → send exchange + log (F2).
+    """
+    if run:
+        if not call_present:
+            return ESMStep(1)  # CQ
+        if not esm_sent:
+            return ESMStep(2, set_sent=True, focus_exchange=True)  # send exchange
+        if not exch_complete:
+            return ESMStep(2)  # repeat exchange while we wait
+        return ESMStep(3, reset=True)  # TU (F3 logs via {LOG})
+    # Search & Pounce
+    if not call_present:
+        return ESMStep(None)
+    if not esm_sent:
+        return ESMStep(4, set_sent=True, focus_exchange=True)  # send my call
+    if not exch_complete:
+        return ESMStep(4)  # resend my call
+    return ESMStep(2, log=True, reset=True)  # send exchange, then log
+
+
 @dataclass
 class MacroSet:
     cw_wpm: int = DEFAULT_WPM

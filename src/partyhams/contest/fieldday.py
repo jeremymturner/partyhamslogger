@@ -26,6 +26,7 @@ from partyhams.contest.base import (
     ExchangeField,
     Macro,
     ScoreSummary,
+    _macros,
 )
 from partyhams.contest.registry import register
 from partyhams.contest.sections import is_valid_section
@@ -88,25 +89,31 @@ class FieldDay(ContestDefinition):
     mult_label = "Sections"
 
     def default_macros(self) -> dict[str, list[Macro]]:
-        # Modeled on N1MM's Field Day CW messages (FD exchange = class + section,
-        # no RST). F3 sends TU and logs the QSO.
-        cw = [
-            Macro(1, "CQ", "CQ FD {MYCALL} {MYCALL} FD"),
-            Macro(2, "Exch", "{EXCH}"),
-            Macro(3, "TU", "TU {MYCALL} FD {LOG}"),
-            Macro(4, "MyCall", "{MYCALL}"),
-            Macro(5, "HisCall", "{CALL}"),
-            Macro(6, "Repeat", "{EXCH} {EXCH}"),
-            Macro(7, "Sec?", "SEC?"),
-            Macro(8, "Agn?", "AGN?"),
-            Macro(9, "Cls?", "CL?"),
-            Macro(10, "Call?", "CALL?"),
-            Macro(11, "", ""),
-            Macro(12, "Wipe", "{WIPE}"),
+        # Modeled on N1MM's Field Day messages (FD exchange = class + section, no
+        # RST). Separate Run and S&P CW banks; F3 (Run) / F2 (S&P) log the QSO.
+        cw_run = [
+            ("CQ", "CQ FD {MYCALL} {MYCALL} FD"),
+            ("Exch", "{EXCH}"),
+            ("TU", "TU {MYCALL} FD {LOG}"),
+            ("MyCall", "{MYCALL}"),
+            ("HisCall", "{CALL}"),
+            ("Repeat", "{EXCH} {EXCH}"),
+            ("Sec?", "SEC?"),
+            ("Agn?", "AGN?"),
+            ("Cls?", "CL?"),
+            ("Call?", "CALL?"),
+            ("", ""),
+            ("Wipe", "{WIPE}"),
         ]
-        phone_labels = ["CQ FD", "Exch", "TU", "QRZ", "", "", "", "", "", "", "", ""]
-        phone = [Macro(i + 1, lbl, "") for i, lbl in enumerate(phone_labels)]
-        return {"CW": cw, "PHONE": phone}
+        cw_sp = list(cw_run)
+        cw_sp[2] = ("TU", "TU {LOG}")  # S&P: brief TU (the exchange key logs)
+        phone = [("CQ FD", ""), ("Exch", ""), ("TU", ""), ("QRZ", ""), *[("", "")] * 8]
+        return {
+            "CW.RUN": _macros(cw_run),
+            "CW.SP": _macros(cw_sp),
+            "PHONE.RUN": _macros(phone),
+            "PHONE.SP": _macros(phone),
+        }
 
     def config_fields(self) -> list[ConfigField]:
         return [

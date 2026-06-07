@@ -237,9 +237,10 @@ Legend: `[MVP]` first release · `[v1]` 1.0 · `[later]` post-1.0
 - [MVP] Real-time score + multiplier tracking
 - ✅ **Function-key macros — DONE.** F1–F12 with N1MM-style `{VAR}` substitution
   (`{MYCALL}` `{CALL}` `{EXCH}` `{RST}` + `{LOG}`/`{WIPE}` actions), CW over Hamlib
-  *and* the native Flex CWX API, voice `.wav` for phone, per-mode-group sets,
-  editor dialog, and **per-event (per-contest) macro preferences** with Field Day
-  defaults modeled on N1MM.
+  *and* the native Flex CWX API, voice `.wav` for phone, editor dialog, and
+  **per-event (per-contest) macro preferences** with Field Day defaults modeled on
+  N1MM. **Run vs S&P banks** (separate CW/phone sets per mode), **ESM** (Enter
+  sends the next message with the next-key highlighted), and **Escape = stop TX**.
 - [MVP] Cabrillo export
 - [v1] More contest modules, rate meters, goals
 - [v1] Run/S&P macro sets

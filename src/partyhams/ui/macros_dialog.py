@@ -23,6 +23,12 @@ _HELP = (
     "CW/digital: text with {MYCALL} {CALL} {EXCH} {RST}, plus {LOG} (log the QSO) "
     "and {WIPE} (clear entry). Phone: a .wav file path."
 )
+_BANK_LABELS = {
+    "CW.RUN": "CW · Run",
+    "CW.SP": "CW · S&P",
+    "PHONE.RUN": "Phone · Run",
+    "PHONE.SP": "Phone · S&P",
+}
 
 
 class MacrosDialog(QDialog):
@@ -44,7 +50,7 @@ class MacrosDialog(QDialog):
         top = QFormLayout()
         self._group = QComboBox()
         for group in self._working:
-            self._group.addItem(group, group)
+            self._group.addItem(_BANK_LABELS.get(group, group), group)
         self._wpm = QSpinBox()
         self._wpm.setRange(5, 60)
         self._wpm.setValue(macro_set.cw_wpm)

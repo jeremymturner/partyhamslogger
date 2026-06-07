@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from partyhams.app.macros import expand, load_macros, save_macros
+from partyhams.app.macros import bank_key, esm_step, expand, load_macros, save_macros
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, default_rst
 from partyhams.core.models import Band, Mode, band_by_label, band_for_freq, mode_group_for
@@ -59,6 +59,9 @@ class MainWindow(QMainWindow):
         self._macros = load_macros(session.contest)  # this event's F-key macros
         self._macros_dialog = None
         self._sound = None  # keep a ref to the playing voice clip
+        self._run = True  # Run vs Search & Pounce (picks the macro bank)
+        self._esm = False  # ESM: Enter sends the next message
+        self._esm_sent = False  # have we sent our exchange/call this QSO?
         #: Set by the app to a no-arg callback that re-runs the radio screen.
         self.on_change_radio: Callable[[], None] | None = None
         self._radio_dialog = None  # app keeps the open radio dialog alive here
@@ -138,6 +141,14 @@ class MainWindow(QMainWindow):
         hbox = QHBoxLayout(bar)
         hbox.setContentsMargins(2, 2, 2, 2)
         hbox.setSpacing(3)
+
+        self._runsp_btn = QPushButton()
+        self._runsp_btn.setMinimumHeight(34)
+        self._runsp_btn.setFixedWidth(64)
+        self._runsp_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._runsp_btn.clicked.connect(lambda: self._set_run(not self._run))
+        hbox.addWidget(self._runsp_btn)
+
         self._fkey_buttons: list[QPushButton] = []
         for key in range(1, 13):
             btn = QPushButton()
@@ -147,6 +158,18 @@ class MainWindow(QMainWindow):
             self._fkey_buttons.append(btn)
             hbox.addWidget(btn)
         return bar
+
+    def _set_run(self, run: bool) -> None:
+        if run == self._run:
+            return
+        self._run = run
+        self._update_fkey_bar()
+
+    def _set_esm(self, on: bool) -> None:
+        self._esm = on
+        self._esm_sent = False
+        self._update_fkey_bar()
+        self.statusBar().showMessage(f"ESM {'on' if on else 'off'}", 2000)
 
     def _setup_fkey_shortcuts(self) -> None:
         for key in range(1, 13):
@@ -173,13 +196,26 @@ class MainWindow(QMainWindow):
     def _current_group(self) -> str:
         return mode_group_for(self._current_mode()).value
 
+    def _current_bank(self) -> str:
+        return bank_key(self._current_group(), self._run)
+
     def _update_fkey_bar(self) -> None:
-        group = self._current_group()
+        bank = self._current_bank()
+        self._runsp_btn.setText("RUN" if self._run else "S&&P")
+        self._runsp_btn.setStyleSheet(
+            f"QPushButton {{ color: {AMBER if self._run else ACCENT}; font-weight: 700; }}"
+        )
+        next_key = self._esm_next_key()
         for key, btn in enumerate(self._fkey_buttons, start=1):
-            macro = self._macros.get(group, key)
+            macro = self._macros.get(bank, key)
             label = macro.label if macro else ""
             btn.setText(f"F{key}\n{label}" if label else f"F{key}")
             btn.setEnabled(bool(macro and macro.content.strip()))
+            # Highlight the key Enter would send next under ESM.
+            if key == next_key:
+                btn.setStyleSheet(f"QPushButton {{ border: 2px solid {MULT}; }}")
+            else:
+                btn.setStyleSheet("")
 
     def _macro_context(self) -> dict[str, str]:
         sent = self.session.config.sent_exchange
@@ -195,8 +231,10 @@ class MainWindow(QMainWindow):
         return ctx
 
     def _fire_macro(self, key: int) -> None:
+        if key == 1:
+            self._set_run(True)  # CQ implies Run mode
         group = self._current_group()
-        macro = self._macros.get(group, key)
+        macro = self._macros.get(self._current_bank(), key)
         if macro is None or not macro.content.strip():
             return
         if group == "DIGITAL":
@@ -214,6 +252,59 @@ class MainWindow(QMainWindow):
                 self._try_log()
             elif action == "wipe":
                 self._wipe_entry()
+
+    # --- ESM (Enter sends messages) ---
+    def _exchange_complete(self) -> bool:
+        if not self._call.text().strip():
+            return False
+        parsed = {n: e.text().strip().upper() for n, e in self._exchange_edits.items()}
+        return not self.session.validate_exchange(parsed)
+
+    def _esm_next_key(self) -> int | None:
+        if not self._esm:
+            return None
+        step = esm_step(
+            self._run,
+            bool(self._call.text().strip()),
+            self._esm_sent,
+            self._exchange_complete(),
+        )
+        return step.key
+
+    def _on_enter(self) -> None:
+        if self._esm:
+            self._esm_advance()
+        else:
+            self._advance_or_log()
+
+    def _esm_advance(self) -> None:
+        step = esm_step(
+            self._run,
+            bool(self._call.text().strip()),
+            self._esm_sent,
+            self._exchange_complete(),
+        )
+        if step.key is None:
+            self._call.setFocus()
+            return
+        if step.set_sent:
+            self._esm_sent = True
+        self._fire_macro(step.key)
+        if step.log:
+            self._try_log()
+        if step.focus_exchange:
+            self._focus_first_empty_exchange()
+        if step.reset:
+            self._esm_sent = False
+        self._update_fkey_bar()
+
+    def _focus_first_empty_exchange(self) -> None:
+        for field in self.session.contest.exchange_fields():
+            edit = self._exchange_edits[field.name]
+            if not edit.text().strip():
+                edit.setFocus()
+                return
+        self._call.setFocus()
 
     def _send_cw(self, text: str) -> None:
         radio = self._poller.radio if self._poller is not None else None
@@ -276,6 +367,9 @@ class MainWindow(QMainWindow):
 
         macros_menu = self.menuBar().addMenu("Macros")
         macros_menu.addAction("Edit Macros…", self._edit_macros)
+        esm_action = macros_menu.addAction("ESM — Enter sends messages")
+        esm_action.setCheckable(True)
+        esm_action.toggled.connect(self._set_esm)
 
     def _radio_menu_clicked(self) -> None:
         if self.on_change_radio is not None:
@@ -336,7 +430,7 @@ class MainWindow(QMainWindow):
         self._call.setMaximumWidth(160)
         make_upper(self._call)
         self._call.textChanged.connect(lambda *_: self._refresh_indicators())
-        self._call.returnPressed.connect(self._advance_or_log)
+        self._call.returnPressed.connect(self._on_enter)
         hbox.addWidget(QLabel("Call"))
         hbox.addWidget(self._call)
 
@@ -348,7 +442,7 @@ class MainWindow(QMainWindow):
             edit.setMaximumWidth(100)
             edit.setPlaceholderText(field.label)
             make_upper(edit)
-            edit.returnPressed.connect(self._advance_or_log)
+            edit.returnPressed.connect(self._on_enter)
             edit.textChanged.connect(lambda *_: self._refresh_indicators())
             self._exchange_edits[field.name] = edit
             hbox.addWidget(QLabel(field.label))
@@ -483,6 +577,8 @@ class MainWindow(QMainWindow):
     def _refresh_indicators(self) -> None:
         """Update the dupe + new-multiplier badges and tint mult exchange fields."""
         call = self._call.text().strip().upper()
+        if not call:
+            self._esm_sent = False  # new QSO starts unsent
         freq, mode = self._current_freq(), self._current_mode()
         is_dupe = bool(call) and self.session.is_dupe(call, freq, mode)
         self._dupe.setText("● DUPE" if is_dupe else "")

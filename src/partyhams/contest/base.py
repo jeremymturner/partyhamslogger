@@ -50,6 +50,11 @@ class Macro:
     content: str
 
 
+def _macros(specs: list[tuple[str, str]]) -> list[Macro]:
+    """Build a 12-key bank from ``(label, content)`` pairs (fresh Macro objects)."""
+    return [Macro(i + 1, label, content) for i, (label, content) in enumerate(specs)]
+
+
 @dataclass
 class ContestConfig:
     """Per-station, per-event settings the operator fills in before logging.
@@ -92,29 +97,36 @@ class ContestDefinition(ABC):
 
     # --- F-key macros ---
     def default_macros(self) -> dict[str, list[Macro]]:
-        """Default F-key messages per mode group ("CW" / "PHONE").
+        """Default F-key messages, keyed by bank ("CW.RUN", "CW.SP", "PHONE.RUN",
+        "PHONE.SP"). Separate Run and S&P banks per mode group, N1MM-style.
 
         CW content uses ``{VAR}`` substitutions (``{MYCALL}``, ``{CALL}``,
         ``{EXCH}``, ``{LOG}``, ``{WIPE}``, …); phone content is a ``.wav`` path.
         Contests override this with event-specific wording (Field Day does).
         """
-        cw = [
-            Macro(1, "CQ", "CQ {MYCALL} {MYCALL}"),
-            Macro(2, "Exch", "{EXCH}"),
-            Macro(3, "TU", "TU {MYCALL} {LOG}"),
-            Macro(4, "MyCall", "{MYCALL}"),
-            Macro(5, "HisCall", "{CALL}"),
-            Macro(6, "Repeat", "{EXCH} {EXCH}"),
-            Macro(7, "", ""),
-            Macro(8, "Agn?", "AGN?"),
-            Macro(9, "Nr?", "NR?"),
-            Macro(10, "Call?", "CL?"),
-            Macro(11, "", ""),
-            Macro(12, "Wipe", "{WIPE}"),
+        cw_run = [
+            ("CQ", "CQ {MYCALL} {MYCALL}"),
+            ("Exch", "{EXCH}"),
+            ("TU", "TU {MYCALL} {LOG}"),
+            ("MyCall", "{MYCALL}"),
+            ("HisCall", "{CALL}"),
+            ("Repeat", "{EXCH} {EXCH}"),
+            ("", ""),
+            ("Agn?", "AGN?"),
+            ("Nr?", "NR?"),
+            ("Call?", "CL?"),
+            ("", ""),
+            ("Wipe", "{WIPE}"),
         ]
-        phone_labels = ["CQ", "Exch", "TU", "QRZ", "", "", "", "", "", "", "", ""]
-        phone = [Macro(i + 1, lbl, "") for i, lbl in enumerate(phone_labels)]
-        return {"CW": cw, "PHONE": phone}
+        cw_sp = list(cw_run)
+        cw_sp[2] = ("TU", "TU {LOG}")  # S&P: a brief TU
+        phone = [("CQ", ""), ("Exch", ""), ("TU", ""), ("QRZ", ""), *[("", "")] * 8]
+        return {
+            "CW.RUN": _macros(cw_run),
+            "CW.SP": _macros(cw_sp),
+            "PHONE.RUN": _macros(phone),
+            "PHONE.SP": _macros(phone),
+        }
 
     # --- setup / exchange ---
     def config_fields(self) -> list[ConfigField]:
