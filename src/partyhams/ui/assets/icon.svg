@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#283040"/>
+      <stop offset="1" stop-color="#11141a"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5ab9e9"/>
+      <stop offset="1" stop-color="#3f93c6"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.4" r="0.6">
+      <stop offset="0" stop-color="#f4c065"/>
+      <stop offset="1" stop-color="#d8962c"/>
+    </radialGradient>
+  </defs>
+
+  <!-- badge -->
+  <rect x="8" y="8" width="496" height="496" rx="116" fill="url(#bg)"/>
+  <rect x="14" y="14" width="484" height="484" rx="110" fill="none"
+        stroke="#4aa8d8" stroke-opacity="0.4" stroke-width="4"/>
+
+  <!-- concentric RF signal arcs, radiating left and right of the core -->
+  <g fill="none" stroke="url(#wave)" stroke-width="26" stroke-linecap="round">
+    <path d="M 309 197 A 80 80 0 0 1 309 315"  stroke-opacity="1"/>
+    <path d="M 203 197 A 80 80 0 0 0 203 315"  stroke-opacity="1"/>
+    <path d="M 343 159 A 130 130 0 0 1 343 353" stroke-opacity="0.6"/>
+    <path d="M 169 159 A 130 130 0 0 0 169 353" stroke-opacity="0.6"/>
+    <path d="M 376 122 A 180 180 0 0 1 376 390" stroke-opacity="0.32"/>
+    <path d="M 136 122 A 180 180 0 0 0 136 390" stroke-opacity="0.32"/>
+  </g>
+
+  <!-- transmit core -->
+  <circle cx="256" cy="256" r="42" fill="#11141a"/>
+  <circle cx="256" cy="256" r="32" fill="url(#core)"/>
+  <circle cx="247" cy="247" r="10" fill="#ffffff" fill-opacity="0.5"/>
+</svg>

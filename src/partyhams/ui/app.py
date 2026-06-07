@@ -25,7 +25,7 @@ from partyhams.radio.hamlib import HamlibRadio
 from partyhams.ui.log_dialog import LogDialog
 from partyhams.ui.main_window import MainWindow
 from partyhams.ui.radio_dialog import RadioDialog
-from partyhams.ui.style import apply_theme
+from partyhams.ui.style import app_icon, apply_theme
 
 APP_NAME = "PartyHams Logger"
 
@@ -137,6 +137,7 @@ def run() -> int:
     _set_macos_app_name(APP_NAME)  # must precede QApplication construction
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setWindowIcon(app_icon())  # window/taskbar; also the macOS dock tile
     apply_theme(app)
     app.setQuitOnLastWindowClosed(False)
     loop = qasync.QEventLoop(app)

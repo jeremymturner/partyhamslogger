@@ -8,7 +8,12 @@ consistently across macOS/Windows/Linux.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
+
+ICON_PATH = Path(__file__).parent / "assets" / "icon.svg"
 
 # Palette
 BG = "#1f2128"
@@ -112,3 +117,8 @@ def apply_theme(app: QApplication) -> None:
     """Apply the PartyHams dark theme to the whole application."""
     app.setStyle("Fusion")
     app.setStyleSheet(APP_QSS)
+
+
+def app_icon() -> QIcon:
+    """The application icon (the cyan/amber RF broadcast mark)."""
+    return QIcon(str(ICON_PATH))
