@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from partyhams.app.session import LogSession
 from partyhams.core.models import Band, Mode, band_by_label
+from partyhams.ui.style import ACCENT, AMBER, DUPE, PEER, TEXT
 
 # Modes offered in the entry row.
 _ENTRY_MODES = [Mode.CW, Mode.USB, Mode.LSB, Mode.FM, Mode.RTTY, Mode.FT8]
@@ -70,8 +71,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     def _build_score_bar(self) -> QLabel:
         self._score_label = QLabel()
+        self._score_label.setObjectName("scoreBar")  # themed in ui/style.py
         self._score_label.setTextFormat(Qt.TextFormat.RichText)
-        self._score_label.setStyleSheet("padding: 6px; font-size: 14px;")
         return self._score_label
 
     def _build_entry_row(self) -> QWidget:
@@ -133,6 +134,8 @@ class MainWindow(QMainWindow):
         self._table.verticalHeader().setVisible(False)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setAlternatingRowColors(True)
+        self._table.setShowGrid(False)
         self._table.horizontalHeader().setStretchLastSection(True)
         return self._table
 
@@ -175,8 +178,8 @@ class MainWindow(QMainWindow):
     def _update_dupe_indicator(self) -> None:
         call = self._call.text().strip().upper()
         if call and self.session.is_dupe(call, self._current_freq(), self._current_mode()):
-            self._dupe.setText("DUPE")
-            self._dupe.setStyleSheet("font-weight: bold; color: #c0392b;")
+            self._dupe.setText("● DUPE")
+            self._dupe.setStyleSheet(f"font-weight: bold; color: {DUPE};")
         else:
             self._dupe.setText("")
 
@@ -228,15 +231,15 @@ class MainWindow(QMainWindow):
         s = self.session.score()
         mult = s.breakdown.get("power_multiplier", 1)
         peers = len(self.session.peers)
-        peer_txt = f" &nbsp; Peers: <b>{peers}</b>" if peers else ""
+        peer_txt = f" &nbsp;|&nbsp; Peers <b style='color:{PEER}'>{peers}</b>" if peers else ""
         call = self.session.config.my_call
         name = self.session.contest.name
         self._score_label.setText(
-            f"<b>{call}</b> &nbsp; {name} &nbsp;|&nbsp; "
-            f"QSOs: <b>{s.qso_count}</b> &nbsp; "
-            f"Points: <b>{s.qso_points}</b> &nbsp; "
-            f"Power ×{mult} &nbsp; "
-            f"Score: <b>{s.total}</b>{peer_txt}"
+            f"<b style='color:{ACCENT}'>{call}</b> &nbsp;·&nbsp; {name} &nbsp;|&nbsp; "
+            f"QSOs <b style='color:{TEXT}'>{s.qso_count}</b> &nbsp; "
+            f"Pts <b style='color:{TEXT}'>{s.qso_points}</b> &nbsp; "
+            f"Pwr <b style='color:{AMBER}'>×{mult}</b> &nbsp; "
+            f"Score <b style='color:{AMBER}'>{s.total}</b>{peer_txt}"
         )
 
     def _reload_table(self) -> None:
@@ -259,7 +262,7 @@ class MainWindow(QMainWindow):
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)
                 if q.operator != self.session.config.my_call:
-                    item.setForeground(QColor("#2c6fbb"))  # QSOs from a peer station
+                    item.setForeground(QColor(PEER))  # QSOs from a peer station
                 self._table.setItem(row, col, item)
 
     # ------------------------------------------------------------------ #

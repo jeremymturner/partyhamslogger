@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QDialog
 from partyhams.app.session import LogSession, build_session
 from partyhams.ui.main_window import MainWindow
 from partyhams.ui.start_dialog import StartDialog
+from partyhams.ui.style import apply_theme
 
 
 def _db_path_for(call: str) -> str:
@@ -41,6 +42,7 @@ def run() -> int:
     import qasync
 
     app = QApplication(sys.argv)
+    apply_theme(app)
     # Don't let the brief gap between the dialog closing and the main window
     # showing trigger a quit; we drive shutdown explicitly from the window's
     # close event so async cleanup runs while the loop is still alive.
