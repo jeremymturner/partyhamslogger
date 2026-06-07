@@ -55,6 +55,10 @@ spike: $(STAMP) ## Run the P2P sync spike (e.g. make spike CALL=W7ABC)
 rig-spike: $(STAMP) ## Watch live freq/mode from rigctld (make rig-spike [HOST=x PORT=y])
 	@$(PY) -m partyhams.radio.spike $(if $(HOST),--host $(HOST)) $(if $(PORT),--port $(PORT))
 
+.PHONY: flex-spike
+flex-spike: $(STAMP) ## Discover/watch a FlexRadio natively (make flex-spike [HOST=ip])
+	@$(PY) -m partyhams.radio.flex_spike $(if $(HOST),--host $(HOST)) $(if $(PORT),--port $(PORT))
+
 .PHONY: test
 test: $(STAMP) ## Run the test suite
 	@$(PY) -m pytest -q
