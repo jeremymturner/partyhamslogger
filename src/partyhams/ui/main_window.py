@@ -37,9 +37,11 @@ from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, default_rst
 from partyhams.core.models import Band, Mode, band_by_label, band_for_freq, mode_group_for
 from partyhams.radio.base import Capability, RadioState
+from partyhams.ui import shortcuts as sc
 from partyhams.ui.macros_dialog import MacrosDialog
 from partyhams.ui.network_panel import NetworkPanel
 from partyhams.ui.sections_window import SectionsWindow
+from partyhams.ui.shortcuts import ShortcutsDialog
 from partyhams.ui.style import ACCENT, AMBER, DUPE, MULT, MULT_BG, PEER, TEXT, TEXT_DIM
 from partyhams.ui.widgets import make_upper
 
@@ -74,6 +76,7 @@ class MainWindow(QMainWindow):
         self.recent_logs_provider: Callable[[], list[tuple[str, str]]] | None = None
         self._radio_dialog = None  # app keeps the open radio dialog alive here
         self._log_dialog = None  # app keeps the open new/open-log dialog alive here
+        self._shortcuts_dialog = None  # the Keyboard Shortcuts dialog while open
         try:
             self._loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -127,7 +130,9 @@ class MainWindow(QMainWindow):
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-        self._view_menu.addAction(dock.toggleViewAction())
+        toggle = dock.toggleViewAction()
+        toggle.setShortcut(QKeySequence(sc.TOGGLE_NETWORK))
+        self._view_menu.addAction(toggle)
 
         self.session.add_chat_listener(self._panel.append_chat)
         self.session.add_roster_listener(self._panel.refresh_roster)
@@ -368,26 +373,38 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("File")
-        file_menu.addAction("New Log…", lambda: self.on_new_log and self.on_new_log())
-        file_menu.addAction("Open Log…", lambda: self.on_open_log and self.on_open_log())
+        new = file_menu.addAction("New Log…", lambda: self.on_new_log and self.on_new_log())
+        new.setShortcut(QKeySequence(sc.NEW_LOG))
+        open_log = file_menu.addAction("Open Log…", lambda: self.on_open_log and self.on_open_log())
+        open_log.setShortcut(QKeySequence(sc.OPEN_LOG))
         self._recent_menu = file_menu.addMenu("Open Recent")
         self._recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
         file_menu.addSeparator()
-        file_menu.addAction("Export ADIF…", self._export_adif)
-        file_menu.addAction("Export Cabrillo…", self._export_cabrillo)
+        adif = file_menu.addAction("Export ADIF…", self._export_adif)
+        adif.setShortcut(QKeySequence(sc.EXPORT_ADIF))
+        cabrillo = file_menu.addAction("Export Cabrillo…", self._export_cabrillo)
+        cabrillo.setShortcut(QKeySequence(sc.EXPORT_CABRILLO))
 
         radio_menu = self.menuBar().addMenu("Radio")
-        radio_menu.addAction("Select Radio…", self._radio_menu_clicked)
+        select_radio = radio_menu.addAction("Select Radio…", self._radio_menu_clicked)
+        select_radio.setShortcut(QKeySequence(sc.SELECT_RADIO))
 
         macros_menu = self.menuBar().addMenu("Macros")
-        macros_menu.addAction("Edit Macros…", self._edit_macros)
+        edit_macros = macros_menu.addAction("Edit Macros…", self._edit_macros)
+        edit_macros.setShortcut(QKeySequence(sc.EDIT_MACROS))
         esm_action = macros_menu.addAction("ESM — Enter sends messages")
         esm_action.setCheckable(True)
+        esm_action.setShortcut(QKeySequence(sc.TOGGLE_ESM))
         esm_action.toggled.connect(self._set_esm)
 
         # The dock toggle is added to this menu later by _build_network_panel.
         self._view_menu = self.menuBar().addMenu("View")
-        self._view_menu.addAction("Sections Worked…", self._open_sections)
+        sections = self._view_menu.addAction("Sections Worked…", self._open_sections)
+        sections.setShortcut(QKeySequence(sc.SECTIONS))
+
+        help_menu = self.menuBar().addMenu("Help")
+        shortcuts = help_menu.addAction("Keyboard Shortcuts…", self._show_shortcuts)
+        shortcuts.setShortcut(QKeySequence(sc.SHORTCUTS))
 
     def _rebuild_recent_menu(self) -> None:
         self._recent_menu.clear()
@@ -400,6 +417,12 @@ class MainWindow(QMainWindow):
                 label,
                 lambda checked=False, p=path: self.on_open_log_path and self.on_open_log_path(p),
             )
+
+    def _show_shortcuts(self) -> None:
+        dialog = ShortcutsDialog(parent=self)
+        self._shortcuts_dialog = dialog  # keep alive while open
+        dialog.finished.connect(lambda _result: setattr(self, "_shortcuts_dialog", None))
+        dialog.open()
 
     def _open_sections(self) -> None:
         if self._sections_window is None:

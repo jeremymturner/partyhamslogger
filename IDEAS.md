@@ -251,6 +251,10 @@ Legend: `[MVP]` first release · `[v1]` 1.0 · `[later]` post-1.0
   last-modified time, and Open Recent is a quick-switch submenu of the last few
   logs. The radio stays connected across switches; the last-used log reopens on
   launch.
+- ✅ **Keyboard shortcuts — DONE.** Every menu command has an accelerator shown
+  next to it (⌘N new, ⌘O open, ⌘E/⇧⌘E export, ⌘R radio, ⌘M macros, ⇧⌘M ESM,
+  ⇧⌘S sections, ⇧⌘N network, ⌘/ help). Help → Keyboard Shortcuts lists them all
+  (plus F1–F12 / Enter / Esc) from one shared catalog, so menu and list never drift.
 - [v1] More contest modules, rate meters, goals
 - [v1] Run/S&P macro sets
 
