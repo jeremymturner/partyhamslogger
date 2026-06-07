@@ -35,13 +35,14 @@ def test_class_and_section_validation():
 
 
 def test_section_list_matches_official_contest_list():
-    # 85 ARRL/RAC contest sections + DX (contests.arrl.org, verified 2026-06-06).
+    # 85 ARRL/RAC contest sections + DX, cross-verified against the ARRL contest
+    # list and the ADIF 3.1.7 ARRL_Section enumeration (both verified 2026-06-06).
     assert len(ARRL_SECTIONS) == 86
     # Sections that were missing/outdated before verification:
     for added in ("SNJ", "NNJ", "WNY", "GH", "NB", "NS", "PE"):
         assert added in ARRL_SECTIONS
-    # The pre-2024 RAC abbreviations are no longer used by ARRL contests:
-    for retired in ("GTA", "MAR"):
+    # Abbreviations ADIF marks deleted must stay out (we validate current entries):
+    for retired in ("GTA", "MAR", "NT", "NWT", "ON"):
         assert retired not in ARRL_SECTIONS
 
 
