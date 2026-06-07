@@ -57,6 +57,19 @@ pytest
 python -m partyhams
 ```
 
+### Try the peer-to-peer sync (Phase-0 spike)
+
+See the multi-station log sync in action — run in two terminals (or on two
+machines on the same LAN), each with a different callsign:
+
+```bash
+make spike CALL=W7ABC
+make spike CALL=K2XYZ
+```
+
+Each instance logs a fake QSO every few seconds; watch the **QSO count** climb
+together and the **log hash** match — that's the peer-to-peer log converging.
+
 ## License
 
 [GPL-3.0-or-later](LICENSE). Free and open source, in keeping with the amateur

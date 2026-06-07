@@ -6,6 +6,7 @@ holds the deterministic merge/reconciliation logic, kept transport-free so it ca
 be unit-tested without sockets.
 """
 
+from partyhams.net.engine import SyncEngine
 from partyhams.net.protocol import (
     PROTOCOL_VERSION,
     Heartbeat,
@@ -19,6 +20,12 @@ from partyhams.net.protocol import (
     qso_to_wire,
 )
 from partyhams.net.sync import LogMerge
+from partyhams.net.transport import (
+    DEFAULT_MCAST_GROUP,
+    DEFAULT_PORT,
+    MulticastTransport,
+    Transport,
+)
 
 __all__ = [
     "PROTOCOL_VERSION",
@@ -32,4 +39,9 @@ __all__ = [
     "qso_from_wire",
     "qso_to_wire",
     "LogMerge",
+    "SyncEngine",
+    "Transport",
+    "MulticastTransport",
+    "DEFAULT_MCAST_GROUP",
+    "DEFAULT_PORT",
 ]

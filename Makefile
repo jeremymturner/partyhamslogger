@@ -46,6 +46,11 @@ run: $(STAMP) ## Launch the app (sets up the venv first if needed)
 	@echo ">> launching PartyHams Logger"
 	@$(PY) -m partyhams
 
+.PHONY: spike
+spike: $(STAMP) ## Run the P2P sync spike (e.g. make spike CALL=W7ABC)
+	@test -n "$(CALL)" || { echo "set CALL, e.g.: make spike CALL=W7ABC"; exit 1; }
+	@$(PY) -m partyhams.net.spike --call $(CALL)
+
 .PHONY: test
 test: $(STAMP) ## Run the test suite
 	@$(PY) -m pytest -q

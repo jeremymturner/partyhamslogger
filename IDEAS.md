@@ -298,7 +298,13 @@ operator** · test gear = **Flex 6500, IC-705, IC-7610 (remote), FT-891** · bui
 ## 8. Roadmap
 
 - **Phase 0 — Spikes (de-risk the hard parts):**
-  - P2P sync prototype: multicast join, QSO merge by UUID, late-join delta, log-hash reconciliation.
+  - ✅ **P2P sync prototype — DONE.** Real UDP-multicast transport
+    (`net/transport.py`), `SyncEngine` (join → Hello-driven catch-up → live QSO
+    broadcast → heartbeat/log-hash reconciliation), and a runnable harness
+    (`net/spike.py`, `make spike CALL=…`). Verified: two engines converge over
+    live sockets *and* deterministically over an in-memory loopback bus
+    (`net/loopback.py`) in CI. Known follow-up: unicast (not multicast)
+    sync-responses, and full version-vector anti-entropy for cross-station edits.
   - Hamlib CAT spike: connect, read freq/mode, send CW over CAT (macOS).
   - PySide6 entry-window prototype: keyboard-first QSO entry feel.
 - **Phase 1 — MVP:** Contest-capable **networked** logger — fast entry, cross-station
