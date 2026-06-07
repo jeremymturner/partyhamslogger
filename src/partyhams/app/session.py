@@ -18,11 +18,13 @@ from pathlib import Path
 from partyhams.contest import get as get_contest
 from partyhams.contest.base import ContestConfig, ContestDefinition, ScoreSummary
 from partyhams.core.clock import new_station_id
-from partyhams.core.models import QSO, Mode, ModeGroup, mode_group_for
+from partyhams.core.models import QSO, Mode, ModeGroup, mode_group_for, utcnow
 from partyhams.db.store import SqliteLog
 from partyhams.export import write_adif, write_cabrillo
 from partyhams.net.engine import SyncEngine
 from partyhams.net.transport import MulticastTransport, NullTransport
+
+RATE_WINDOWS_MIN = (5, 15, 30, 60)  # QSO-rate windows shown in the network panel
 
 
 def default_rst(mode: Mode) -> str:
@@ -44,10 +46,15 @@ class LogSession:
         self.engine = engine
         self.store = store
         self._listeners: list[Callable[[], None]] = []
+        self._roster_listeners: list[Callable[[], None]] = []
+        self._chat_listeners: list[Callable[[dict], None]] = []
+        self._chat_log: list[dict] = []
         self._dupe_keys: set[tuple] = set()
         self._mult_keys: set[tuple[str, str]] = set()
 
         engine.on_qso = self._on_applied
+        engine.on_status = self._on_roster_change
+        engine.on_chat = self._on_chat
         # Load the persisted log into the in-memory merge, clock, and indexes.
         for qso in store.all(include_deleted=True):
             engine.log.apply(qso)
@@ -70,6 +77,119 @@ class LogSession:
 
     async def stop(self) -> None:
         await self.engine.stop()
+
+    # ------------------------------------------------------------------ #
+    # network panel: roster (presence + rates) and chat
+    # ------------------------------------------------------------------ #
+    def add_roster_listener(self, callback: Callable[[], None]) -> None:
+        self._roster_listeners.append(callback)
+
+    def add_chat_listener(self, callback: Callable[[dict], None]) -> None:
+        self._chat_listeners.append(callback)
+
+    def _on_roster_change(self) -> None:
+        for callback in self._roster_listeners:
+            callback()
+
+    def set_local_status(self, freq_hz: int, mode: Mode) -> None:
+        """Push our current frequency/mode so peers see what we're on."""
+        self.engine.update_status(freq_hz=freq_hz, mode=mode.value)
+
+    def station_rates(self, station_id: str, now=None) -> dict[int, int]:
+        """Cumulative QSO counts for a station within each rate window."""
+        now = now or utcnow()
+        counts = {w: 0 for w in RATE_WINDOWS_MIN}
+        for qso in self.engine.log.qsos():
+            if qso.station_id != station_id:
+                continue
+            age_min = (now - qso.timestamp).total_seconds() / 60.0
+            for window in RATE_WINDOWS_MIN:
+                if age_min <= window:
+                    counts[window] += 1
+        return counts
+
+    def roster(self) -> list[dict]:
+        """All known stations (self first), with operating state and QSO rates."""
+        now = utcnow()
+        rows = [
+            self._station_row(
+                self.engine.station_id,
+                {
+                    "operator": self.engine.operator,
+                    "call": self.engine.call,
+                    "freq_hz": int(self.engine._status["freq_hz"]),
+                    "mode": str(self.engine._status["mode"]),
+                    "last_heard": now,
+                },
+                is_self=True,
+                now=now,
+            )
+        ]
+        for sid, info in self.engine.stations.items():
+            rows.append(self._station_row(sid, info, is_self=False, now=now))
+        return rows
+
+    def _station_row(self, sid: str, info: dict, is_self: bool, now) -> dict:
+        last_heard = info.get("last_heard")
+        stale = (not is_self) and (last_heard is None or (now - last_heard).total_seconds() > 20)
+        return {
+            "station_id": sid,
+            "operator": info.get("operator", ""),
+            "call": info.get("call", ""),
+            "freq_hz": int(info.get("freq_hz", 0) or 0),
+            "mode": info.get("mode", ""),
+            "is_self": is_self,
+            "stale": stale,
+            "rates": self.station_rates(sid, now),
+        }
+
+    def operators(self) -> list[str]:
+        """Distinct peer operator names (for the chat recipient list)."""
+        seen = {
+            info.get("operator", "")
+            for info in self.engine.stations.values()
+            if info.get("operator")
+        }
+        seen.discard(self.engine.operator)
+        return sorted(seen)
+
+    def post_chat(self, to_op: str, text: str) -> dict:
+        """Record a chat message locally and notify listeners (also broadcast it)."""
+        entry = {
+            "from_op": self.engine.operator,
+            "to_op": to_op,
+            "text": text,
+            "ts": utcnow().isoformat(),
+            "incoming": False,
+        }
+        self._chat_log.append(entry)
+        self._emit_chat(entry)
+        return entry
+
+    async def broadcast_chat(self, to_op: str, text: str) -> None:
+        await self.engine.send_chat(to_op, text)
+
+    def _on_chat(self, message, sender: str) -> None:
+        # Show broadcasts and messages addressed to us; ignore others' DMs.
+        addressed_to_all = message.to_op in ("", "*")
+        if not (addressed_to_all or message.to_op == self.engine.operator):
+            return
+        entry = {
+            "from_op": message.from_op,
+            "to_op": message.to_op,
+            "text": message.text,
+            "ts": message.ts,
+            "incoming": True,
+        }
+        self._chat_log.append(entry)
+        self._emit_chat(entry)
+
+    def _emit_chat(self, entry: dict) -> None:
+        for callback in self._chat_listeners:
+            callback(entry)
+
+    def chat_messages(self) -> list[dict]:
+        return list(self._chat_log)
 
     # ------------------------------------------------------------------ #
     # apply hook (local + remote QSOs)

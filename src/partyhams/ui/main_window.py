@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QColor
 from PySide6.QtWidgets import (
     QComboBox,
+    QDockWidget,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -34,6 +35,7 @@ from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession
 from partyhams.core.models import Band, Mode, band_by_label, band_for_freq
 from partyhams.radio.base import RadioState
+from partyhams.ui.network_panel import NetworkPanel
 from partyhams.ui.style import ACCENT, AMBER, DUPE, MULT, MULT_BG, PEER, TEXT, TEXT_DIM
 from partyhams.ui.widgets import make_upper
 
@@ -89,9 +91,36 @@ class MainWindow(QMainWindow):
         self._radio_status_label = QLabel()
         self.statusBar().addPermanentWidget(self._radio_status_label)
 
+        self._build_network_panel()
         self.set_poller(radio_poller)
         self._call.setFocus()
         self.refresh()
+
+    def _build_network_panel(self) -> None:
+        """Dockable side panel: station roster + chat (toggle via the View menu)."""
+        self._panel = NetworkPanel(self.session)
+        self._panel.on_send_chat = self._send_chat
+        dock = QDockWidget("Network", self)
+        dock.setObjectName("networkDock")
+        dock.setWidget(self._panel)
+        dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        self.menuBar().addMenu("View").addAction(dock.toggleViewAction())
+
+        self.session.add_chat_listener(self._panel.append_chat)
+        self.session.add_roster_listener(self._panel.refresh_roster)
+        # Rates change with the clock, so refresh the roster on a timer too.
+        self._roster_timer = QTimer(self)
+        self._roster_timer.setInterval(2000)
+        self._roster_timer.timeout.connect(self._panel.refresh_roster)
+        self._roster_timer.start()
+
+    def _send_chat(self, to_op: str, text: str) -> None:
+        self.session.post_chat(to_op, text)  # local echo via the chat listener
+        if self._loop is not None and self._loop.is_running():
+            self._loop.create_task(self.session.broadcast_chat(to_op, text))
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("File")
@@ -324,6 +353,8 @@ class MainWindow(QMainWindow):
                 edit.setStyleSheet("")
 
         self._update_freq_readout()
+        # Let peers see what band/mode we're on (broadcast by the presence loop).
+        self.session.set_local_status(freq, mode)
 
     def _advance_or_log(self) -> None:
         if not self._call.text().strip():

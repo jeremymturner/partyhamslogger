@@ -55,6 +55,26 @@ def test_heartbeat_roundtrip():
     assert decoded.log_hash == "deadbeef"
 
 
+def test_station_status_roundtrip():
+    decoded = roundtrip(
+        p.StationStatus(operator="N0AW", call="W7ABC", freq_hz=14_040_000, mode="CW")
+    )
+    assert isinstance(decoded, p.StationStatus)
+    assert decoded.operator == "N0AW"
+    assert decoded.freq_hz == 14_040_000
+    assert decoded.mode == "CW"
+
+
+def test_chat_roundtrip():
+    decoded = roundtrip(
+        p.Chat(from_op="N0AW", to_op="*", text="hi all", ts="2026-06-27T18:00:00+00:00")
+    )
+    assert isinstance(decoded, p.Chat)
+    assert decoded.from_op == "N0AW"
+    assert decoded.to_op == "*"
+    assert decoded.text == "hi all"
+
+
 def test_rejects_wrong_version():
     data = p.encode(p.Heartbeat(count=1, log_hash="x", lamport_max=1), NET, SENDER)
     tampered = data.replace(b'"v":1', b'"v":999')

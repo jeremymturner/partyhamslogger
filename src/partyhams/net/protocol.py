@@ -109,7 +109,29 @@ class Heartbeat:
     type: str = "heartbeat"
 
 
-Message = Hello | QsoMessage | SyncRequest | SyncResponse | Heartbeat
+@dataclass
+class StationStatus:
+    """Presence + current operating state of a station (for the network panel)."""
+
+    operator: str
+    call: str
+    freq_hz: int
+    mode: str
+    type: str = "status"
+
+
+@dataclass
+class Chat:
+    """A chat message. ``to_op`` empty or ``"*"`` means everyone."""
+
+    from_op: str
+    to_op: str
+    text: str
+    ts: str  # ISO-8601 UTC
+    type: str = "chat"
+
+
+Message = Hello | QsoMessage | SyncRequest | SyncResponse | Heartbeat | StationStatus | Chat
 
 
 # --------------------------------------------------------------------------- #
@@ -156,6 +178,22 @@ def _body_to_dict(msg: Message) -> dict:
             "log_hash": msg.log_hash,
             "lamport_max": msg.lamport_max,
         }
+    if isinstance(msg, StationStatus):
+        return {
+            "type": "status",
+            "operator": msg.operator,
+            "call": msg.call,
+            "freq_hz": msg.freq_hz,
+            "mode": msg.mode,
+        }
+    if isinstance(msg, Chat):
+        return {
+            "type": "chat",
+            "from_op": msg.from_op,
+            "to_op": msg.to_op,
+            "text": msg.text,
+            "ts": msg.ts,
+        }
     raise TypeError(f"cannot encode message of type {type(msg).__name__}")
 
 
@@ -175,4 +213,10 @@ def _body_from_dict(obj: dict) -> Message:
         return Heartbeat(
             count=obj["count"], log_hash=obj["log_hash"], lamport_max=obj["lamport_max"]
         )
+    if t == "status":
+        return StationStatus(
+            operator=obj["operator"], call=obj["call"], freq_hz=obj["freq_hz"], mode=obj["mode"]
+        )
+    if t == "chat":
+        return Chat(from_op=obj["from_op"], to_op=obj["to_op"], text=obj["text"], ts=obj["ts"])
     raise ValueError(f"unknown message type: {t!r}")

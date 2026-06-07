@@ -9,9 +9,11 @@ be unit-tested without sockets.
 from partyhams.net.engine import SyncEngine
 from partyhams.net.protocol import (
     PROTOCOL_VERSION,
+    Chat,
     Heartbeat,
     Hello,
     QsoMessage,
+    StationStatus,
     SyncRequest,
     SyncResponse,
     decode,
@@ -29,9 +31,11 @@ from partyhams.net.transport import (
 
 __all__ = [
     "PROTOCOL_VERSION",
+    "Chat",
     "Heartbeat",
     "Hello",
     "QsoMessage",
+    "StationStatus",
     "SyncRequest",
     "SyncResponse",
     "decode",

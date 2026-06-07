@@ -20,17 +20,21 @@ import asyncio
 from collections.abc import Callable
 
 from partyhams.core.clock import LamportClock, new_uuid
-from partyhams.core.models import QSO, Mode
+from partyhams.core.models import QSO, Mode, utcnow
 from partyhams.net.protocol import (
+    Chat,
     Heartbeat,
     Hello,
     Message,
     QsoMessage,
+    StationStatus,
     SyncRequest,
     SyncResponse,
 )
 from partyhams.net.sync import LogMerge
 from partyhams.net.transport import HEARTBEAT_INTERVAL_S, Transport
+
+STATUS_INTERVAL_S = 3.0  # how often we re-broadcast our operating state
 
 
 class SyncEngine:
@@ -42,7 +46,10 @@ class SyncEngine:
         call: str,
         log: LogMerge | None = None,
         heartbeat_interval: float = HEARTBEAT_INTERVAL_S,
+        status_interval: float = STATUS_INTERVAL_S,
         on_qso: Callable[[QSO], None] | None = None,
+        on_status: Callable[[], None] | None = None,
+        on_chat: Callable[[Chat, str], None] | None = None,
     ) -> None:
         self.transport = transport
         self.station_id = transport.station_id
@@ -51,11 +58,18 @@ class SyncEngine:
         self.log = log if log is not None else LogMerge()
         self.clock = LamportClock()
         self.heartbeat_interval = heartbeat_interval
+        self.status_interval = status_interval
         # Fired whenever a QSO is applied locally or from a peer (state changed).
         # The app layer uses this to persist + refresh the UI.
         self.on_qso = on_qso
-        # station_id -> operator label, for the "who's on" view.
+        self.on_status = on_status  # a peer's presence/state changed
+        self.on_chat = on_chat  # (Chat, sender_station_id) for an incoming message
+        # station_id -> operator label, for the legacy "who's on" count.
         self.peers: dict[str, str] = {}
+        # station_id -> {operator, call, freq_hz, mode, last_heard} for peers.
+        self.stations: dict[str, dict] = {}
+        # Our own current operating state, broadcast periodically.
+        self._status = {"operator": operator, "call": call, "freq_hz": 0, "mode": Mode.CW.value}
         self._tasks: list[asyncio.Task] = []
         self._running = False
 
@@ -78,6 +92,7 @@ class SyncEngine:
         self._tasks = [
             asyncio.create_task(self._recv_loop()),
             asyncio.create_task(self._heartbeat_loop()),
+            asyncio.create_task(self._status_loop()),
         ]
 
     async def stop(self) -> None:
@@ -151,6 +166,37 @@ class SyncEngine:
         )
 
     # ------------------------------------------------------------------ #
+    # presence + chat
+    # ------------------------------------------------------------------ #
+    def update_status(self, *, freq_hz: int, mode: str, operator: str | None = None) -> None:
+        """Update our current operating state (broadcast by the presence loop)."""
+        if operator:
+            self._status["operator"] = operator
+            self.operator = operator
+        self._status["freq_hz"] = freq_hz
+        self._status["mode"] = mode
+
+    async def send_status(self) -> None:
+        await self.transport.send(
+            StationStatus(
+                operator=self._status["operator"],
+                call=self.call,
+                freq_hz=int(self._status["freq_hz"]),
+                mode=str(self._status["mode"]),
+            )
+        )
+
+    async def send_chat(self, to_op: str, text: str) -> Chat:
+        msg = Chat(from_op=self.operator, to_op=to_op, text=text, ts=utcnow().isoformat())
+        await self.transport.send(msg)
+        return msg
+
+    async def _status_loop(self) -> None:
+        while self._running:
+            await self.send_status()
+            await asyncio.sleep(self.status_interval)
+
+    # ------------------------------------------------------------------ #
     # receive
     # ------------------------------------------------------------------ #
     async def pump_once(self) -> bool:
@@ -182,8 +228,32 @@ class SyncEngine:
 
         elif isinstance(message, Hello):
             self.peers[sender] = message.call or message.operator or sender
-            # The newcomer told us what it has; send back anything it's missing.
+            self.stations.setdefault(
+                sender,
+                {"operator": message.operator, "call": message.call, "freq_hz": 0, "mode": ""},
+            )["last_heard"] = utcnow()
+            if self.on_status is not None:
+                self.on_status()
+            # The newcomer told us what it has; send back anything it's missing,
+            # and let it see our current state right away.
             await self._send_diff(message.high_water)
+            await self.send_status()
+
+        elif isinstance(message, StationStatus):
+            self.stations[sender] = {
+                "operator": message.operator,
+                "call": message.call,
+                "freq_hz": message.freq_hz,
+                "mode": message.mode,
+                "last_heard": utcnow(),
+            }
+            self.peers[sender] = message.call or message.operator or sender
+            if self.on_status is not None:
+                self.on_status()
+
+        elif isinstance(message, Chat):
+            if self.on_chat is not None:
+                self.on_chat(message, sender)
 
         elif isinstance(message, SyncRequest):
             await self._send_diff(message.high_water)

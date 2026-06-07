@@ -245,7 +245,11 @@ Legend: `[MVP]` first release · `[v1]` 1.0 · `[later]` post-1.0
 - [MVP] Cross-station dupe + multiplier checking
 - [MVP] Operator identity, serial-number coordination
 - [MVP] Late-join delta sync + divergence reconciliation
-- [v1] Live aggregate score, "who's on what" panel, op-to-op chat
+- ✅ **Network panel — DONE.** Dockable side panel: station roster (operator,
+  freq, mode, QSO rates over 5/15/30/60 min, from presence broadcasts + the synced
+  log) and a chat (broadcast or direct-to-operator). `net` gains `StationStatus` +
+  `Chat` messages; engine broadcasts presence on a loop.
+- [v1] Live aggregate score
 - [v1] N1MM-compatible UDP interop
 
 ### 5.6 Digital & external integration
