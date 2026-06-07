@@ -53,6 +53,7 @@ class MainWindow(QMainWindow):
         self._on_close = on_close
         #: Set by the app to a no-arg callback that re-runs the radio screen.
         self.on_change_radio: Callable[[], None] | None = None
+        self._radio_dialog = None  # app keeps the open radio dialog alive here
         try:
             self._loop = asyncio.get_event_loop()
         except RuntimeError:

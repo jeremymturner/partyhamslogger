@@ -123,15 +123,22 @@ def run() -> int:
         app.quit()
 
     def _request_radio_change(window: MainWindow) -> None:
-        if loop.is_running():
-            loop.create_task(_change_radio(window))
+        # Show the dialog NON-blocking (open(), not exec()) so we never spin a
+        # nested event loop inside a running task — that re-enters the asyncio
+        # scheduler and crashes qasync. The async swap is scheduled on `finished`.
+        dialog = RadioDialog(current=state.radio, parent=window)
+        window._radio_dialog = dialog  # keep a reference alive while open
+        dialog.finished.connect(lambda result: _on_radio_dialog_done(window, dialog, result))
+        dialog.open()
 
-    async def _change_radio(window: MainWindow) -> None:
-        dialog = RadioDialog(current=state.radio)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        state.radio = dialog.settings()
-        save_state(state)
+    def _on_radio_dialog_done(window: MainWindow, dialog: RadioDialog, result: int) -> None:
+        window._radio_dialog = None
+        if result == QDialog.DialogCode.Accepted.value:
+            state.radio = dialog.settings()
+            save_state(state)
+            loop.create_task(_apply_radio(window))
+
+    async def _apply_radio(window: MainWindow) -> None:
         if holder["poller"] is not None:
             await holder["poller"].stop()
         holder["poller"] = await _start_poller(_poller_from_radio(state.radio), window)

@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 
 class RadioDialog(QDialog):
-    def __init__(self, current: dict | None = None) -> None:
-        super().__init__()
+    def __init__(self, current: dict | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
         self.setWindowTitle("PartyHams Logger — Select Radio")
         self.setMinimumWidth(380)
 
