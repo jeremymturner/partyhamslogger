@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 APP_DIR = Path.home() / ".partyhams"
 LOGS_DIR = APP_DIR / "logs"
 STATE_FILE = APP_DIR / "state.json"
+
+
+#: How many recently-used logs to remember for the Recent Logs menu.
+MAX_RECENT_LOGS = 8
 
 
 @dataclass
@@ -25,6 +29,8 @@ class AppState:
     #: Saved radio choice, e.g. {"kind": "hamlib"|"flex"|"none", "conn": "..."}.
     #: None means the radio prompt hasn't been answered yet.
     radio: dict | None = None
+    #: Recently-used log paths, most-recent first (for the Recent Logs menu).
+    recent_logs: list[str] = field(default_factory=list)
 
 
 def load_state(path: Path = STATE_FILE) -> AppState:
@@ -32,13 +38,28 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
         return AppState()
-    return AppState(current_log=data.get("current_log"), radio=data.get("radio"))
+    return AppState(
+        current_log=data.get("current_log"),
+        radio=data.get("radio"),
+        recent_logs=data.get("recent_logs") or [],
+    )
 
 
 def save_state(state: AppState, path: Path = STATE_FILE) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"current_log": state.current_log, "radio": state.radio}
+    payload = {
+        "current_log": state.current_log,
+        "radio": state.radio,
+        "recent_logs": state.recent_logs,
+    }
     path.write_text(json.dumps(payload, indent=2))
+
+
+def push_recent(state: AppState, path: str) -> None:
+    """Record ``path`` as the most-recently-used log (dedup, capped)."""
+    recent = [p for p in state.recent_logs if p != path]
+    recent.insert(0, path)
+    state.recent_logs = recent[:MAX_RECENT_LOGS]
 
 
 def new_log_path(contest_id: str, call: str, logs_dir: Path = LOGS_DIR) -> str:

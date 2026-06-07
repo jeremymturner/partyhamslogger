@@ -8,6 +8,14 @@ from partyhams.app.session import (
     default_rst,
     list_logs,
     open_session,
+    summarize_log,
 )
 
-__all__ = ["LogSession", "build_session", "open_session", "list_logs", "default_rst"]
+__all__ = [
+    "LogSession",
+    "build_session",
+    "open_session",
+    "list_logs",
+    "summarize_log",
+    "default_rst",
+]

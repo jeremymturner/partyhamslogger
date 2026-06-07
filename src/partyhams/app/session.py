@@ -390,36 +390,38 @@ def build_session(
     return _assemble(contest, config, operator, network, store)
 
 
+def summarize_log(path: str | Path) -> dict | None:
+    """Summary of one log file (contest, call, QSO count, mtime), or None if unreadable."""
+    path = Path(path)
+    try:
+        store = SqliteLog(path)
+        meta = store.all_meta()
+        qsos = len(store.all())
+        store.close()
+    except Exception:  # noqa: BLE001 - unreadable/foreign/missing file
+        return None
+    contest_id = meta.get("contest_id", "")
+    try:
+        name = get_contest(contest_id).name
+    except KeyError:
+        name = contest_id or "?"
+    return {
+        "path": str(path),
+        "contest": name,
+        "call": meta.get("my_call", ""),
+        "qsos": qsos,
+        "mtime": path.stat().st_mtime,
+    }
+
+
 def list_logs(logs_dir: Path | None = None) -> list[dict]:
     """Summarize every saved log file (for the Open Log chooser), newest first."""
     from partyhams.app.state import LOGS_DIR
 
     logs_dir = logs_dir if logs_dir is not None else LOGS_DIR
-    out: list[dict] = []
     if not logs_dir.exists():
-        return out
-    for path in logs_dir.glob("*.sqlite"):
-        try:
-            store = SqliteLog(path)
-            meta = store.all_meta()
-            qsos = len(store.all())
-            store.close()
-        except Exception:  # noqa: BLE001 - skip unreadable/foreign files
-            continue
-        contest_id = meta.get("contest_id", "")
-        try:
-            name = get_contest(contest_id).name
-        except KeyError:
-            name = contest_id or "?"
-        out.append(
-            {
-                "path": str(path),
-                "contest": name,
-                "call": meta.get("my_call", ""),
-                "qsos": qsos,
-                "mtime": path.stat().st_mtime,
-            }
-        )
+        return []
+    out = [s for path in logs_dir.glob("*.sqlite") if (s := summarize_log(path))]
     out.sort(key=lambda d: d["mtime"], reverse=True)
     return out
 

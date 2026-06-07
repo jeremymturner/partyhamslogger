@@ -68,6 +68,10 @@ class MainWindow(QMainWindow):
         self.on_change_radio: Callable[[], None] | None = None
         self.on_new_log: Callable[[], None] | None = None
         self.on_open_log: Callable[[], None] | None = None
+        #: Open a specific log by path (a Recent Logs entry).
+        self.on_open_log_path: Callable[[str], None] | None = None
+        #: Returns recent logs as (path, label) pairs, most-recent first.
+        self.recent_logs_provider: Callable[[], list[tuple[str, str]]] | None = None
         self._radio_dialog = None  # app keeps the open radio dialog alive here
         self._log_dialog = None  # app keeps the open new/open-log dialog alive here
         try:
@@ -366,6 +370,8 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("File")
         file_menu.addAction("New Log…", lambda: self.on_new_log and self.on_new_log())
         file_menu.addAction("Open Log…", lambda: self.on_open_log and self.on_open_log())
+        self._recent_menu = file_menu.addMenu("Open Recent")
+        self._recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
         file_menu.addSeparator()
         file_menu.addAction("Export ADIF…", self._export_adif)
         file_menu.addAction("Export Cabrillo…", self._export_cabrillo)
@@ -382,6 +388,18 @@ class MainWindow(QMainWindow):
         # The dock toggle is added to this menu later by _build_network_panel.
         self._view_menu = self.menuBar().addMenu("View")
         self._view_menu.addAction("Sections Worked…", self._open_sections)
+
+    def _rebuild_recent_menu(self) -> None:
+        self._recent_menu.clear()
+        entries = self.recent_logs_provider() if self.recent_logs_provider else []
+        if not entries:
+            self._recent_menu.addAction("(no recent logs)").setEnabled(False)
+            return
+        for path, label in entries:
+            self._recent_menu.addAction(
+                label,
+                lambda checked=False, p=path: self.on_open_log_path and self.on_open_log_path(p),
+            )
 
     def _open_sections(self) -> None:
         if self._sections_window is None:

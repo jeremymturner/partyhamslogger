@@ -18,8 +18,8 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QDialog
 
 from partyhams.app.radio import RadioPoller
-from partyhams.app.session import LogSession, build_session, open_session
-from partyhams.app.state import AppState, load_state, new_log_path, save_state
+from partyhams.app.session import LogSession, build_session, open_session, summarize_log
+from partyhams.app.state import AppState, load_state, new_log_path, push_recent, save_state
 from partyhams.radio.civ_protocol import CIV_ADDR_IC705, CIV_ADDR_IC7610
 from partyhams.radio.flex import FlexRadio
 from partyhams.radio.hamlib import HamlibRadio
@@ -110,18 +110,26 @@ def _session_from_log_dialog(cfg: dict) -> tuple[LogSession, str]:
     return session, db_path
 
 
+def _remember_log(state: AppState, path: str) -> None:
+    """Mark ``path`` as the current log and bump it to the top of Recent Logs."""
+    state.current_log = path
+    push_recent(state, path)
+    save_state(state)
+
+
 def _open_or_create_log(state: AppState) -> LogSession | None:
     """Reopen the remembered log, or run the creation screen. None if cancelled."""
     if state.current_log and Path(state.current_log).exists():
         with contextlib.suppress(Exception):
-            return open_session(state.current_log)  # fall through if corrupt/old
+            session = open_session(state.current_log)  # fall through if corrupt/old
+            _remember_log(state, state.current_log)
+            return session
 
     dialog = LogDialog()
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     session, db_path = _session_from_log_dialog(dialog.settings())
-    state.current_log = db_path
-    save_state(state)
+    _remember_log(state, db_path)
     return session
 
 
@@ -175,6 +183,8 @@ def run() -> int:
             window.on_change_radio = lambda w=window: _request_radio_change(w)
             window.on_new_log = lambda w=window: _new_log_flow(w)
             window.on_open_log = lambda w=window: _open_log_flow(w)
+            window.on_open_log_path = _open_recent
+            window.recent_logs_provider = _recent_entries
             window.show()
             ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
             window.set_poller(ctx["poller"])
@@ -205,8 +215,7 @@ def run() -> int:
     def _new_log_done(dialog: LogDialog, result: int) -> None:
         if result == QDialog.DialogCode.Accepted.value:
             new_session, db_path = _session_from_log_dialog(dialog.settings())
-            state.current_log = db_path
-            save_state(state)
+            _remember_log(state, db_path)
             _switch_to(new_session)
 
     def _open_log_flow(window: MainWindow) -> None:
@@ -217,15 +226,32 @@ def run() -> int:
 
     def _open_log_done(dialog: OpenLogDialog, result: int) -> None:
         path = dialog.selected_path()
-        if result != QDialog.DialogCode.Accepted.value or not path:
-            return
+        if result == QDialog.DialogCode.Accepted.value and path:
+            _open_recent(path)
+
+    def _open_recent(path: str) -> None:
+        if path == state.current_log:
+            return  # already open
         try:
             new_session = open_session(path)
-        except Exception:  # noqa: BLE001 - unreadable/foreign file; ignore
+        except Exception:  # noqa: BLE001 - unreadable/foreign/missing file; ignore
             return
-        state.current_log = path
-        save_state(state)
+        _remember_log(state, path)
         _switch_to(new_session)
+
+    def _recent_entries() -> list[tuple[str, str]]:
+        entries: list[tuple[str, str]] = []
+        for path in state.recent_logs:
+            if path == state.current_log:
+                continue  # the active log isn't a switch target
+            summary = summarize_log(path)
+            if summary is None:
+                continue  # skip deleted/unreadable logs
+            label = summary["contest"]
+            if summary["call"]:
+                label = f"{label} — {summary['call']}"
+            entries.append((path, label))
+        return entries
 
     def _switch_to(new_session: LogSession) -> None:
         ctx["next"] = new_session

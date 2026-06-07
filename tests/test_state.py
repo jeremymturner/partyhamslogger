@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from partyhams.app.session import build_session, open_session
-from partyhams.app.state import AppState, load_state, new_log_path, save_state
+from partyhams.app.state import (
+    MAX_RECENT_LOGS,
+    AppState,
+    load_state,
+    new_log_path,
+    push_recent,
+    save_state,
+)
 from partyhams.core.models import Mode
 
 
@@ -16,6 +23,28 @@ def test_state_round_trip(tmp_path):
     loaded = load_state(path)
     assert loaded.current_log == "/logs/fd.sqlite"
     assert loaded.radio == {"kind": "flex", "conn": ""}
+
+
+def test_recent_logs_round_trip(tmp_path):
+    path = tmp_path / "state.json"
+    state = AppState()
+    push_recent(state, "/logs/a.sqlite")
+    push_recent(state, "/logs/b.sqlite")
+    save_state(state, path)
+    assert load_state(path).recent_logs == ["/logs/b.sqlite", "/logs/a.sqlite"]
+
+
+def test_push_recent_dedups_and_caps():
+    state = AppState()
+    for i in range(MAX_RECENT_LOGS + 3):
+        push_recent(state, f"/logs/{i}.sqlite")
+    # Most-recent first, capped at the limit.
+    assert len(state.recent_logs) == MAX_RECENT_LOGS
+    assert state.recent_logs[0] == f"/logs/{MAX_RECENT_LOGS + 2}.sqlite"
+    # Re-pushing an existing path moves it to the front without duplicating.
+    push_recent(state, "/logs/5.sqlite")
+    assert state.recent_logs[0] == "/logs/5.sqlite"
+    assert state.recent_logs.count("/logs/5.sqlite") == 1
 
 
 def test_load_state_tolerates_garbage(tmp_path):
