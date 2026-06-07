@@ -109,6 +109,14 @@ class HamlibRadio(Radio):
             await self._command(f"L KEYSPD {wpm}")
         await self._command(f"b {text}")
 
+    async def stop_tx(self) -> None:
+        # Abort CW being keyed (\stop_morse), then drop PTT — best effort.
+        for cmd in ("\\stop_morse", "T 0"):
+            try:
+                await self._command(cmd)
+            except OSError:
+                pass
+
     # --- protocol plumbing ---
     async def _command(self, cmd: str) -> dict[str, str]:
         """Send one extended-mode command; return parsed ``Key: value`` fields.

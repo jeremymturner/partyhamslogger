@@ -60,6 +60,21 @@ async def test_ptt_and_cw():
     await fake.stop()
 
 
+async def test_stop_tx_aborts_cw_and_drops_ptt():
+    fake = FakeRigctld()
+    host, port = await fake.start()
+    radio = HamlibRadio(host, port)
+    await radio.connect()
+
+    await radio.set_ptt(True)
+    await radio.stop_tx()
+    assert fake.morse_stopped is True
+    assert fake.ptt == "0"
+
+    await radio.disconnect()
+    await fake.stop()
+
+
 async def test_command_error_raises():
     fake = FakeRigctld()
     host, port = await fake.start()

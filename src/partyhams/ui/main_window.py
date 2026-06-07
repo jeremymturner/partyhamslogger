@@ -153,6 +153,22 @@ class MainWindow(QMainWindow):
             seq = QKeySequence(getattr(Qt.Key, f"Key_F{key}"))
             shortcut = QShortcut(seq, self)
             shortcut.activated.connect(lambda k=key: self._fire_macro(k))
+        # Escape = emergency stop transmitting.
+        stop = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        stop.activated.connect(self._stop_tx)
+
+    def _stop_tx(self) -> None:
+        radio = self._poller.radio if self._poller is not None else None
+        if radio is None or self._loop is None or not self._loop.is_running():
+            return
+        self._loop.create_task(self._do_stop_tx(radio))
+
+    async def _do_stop_tx(self, radio) -> None:
+        try:
+            await radio.stop_tx()
+            self.statusBar().showMessage("TX stopped", 1500)
+        except Exception as exc:  # noqa: BLE001 - emergency stop must never crash
+            self.statusBar().showMessage(f"Stop TX failed: {exc}", 3000)
 
     def _current_group(self) -> str:
         return mode_group_for(self._current_mode()).value

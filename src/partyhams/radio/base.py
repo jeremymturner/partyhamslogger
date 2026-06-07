@@ -93,3 +93,11 @@ class Radio(ABC):
     async def send_cw(self, text: str, wpm: int | None = None) -> None:
         """Send CW via the rig's keyer. Override if ``Capability.SEND_CW``."""
         raise RadioUnsupported(f"{self.backend_name} does not support CW keying")
+
+    async def stop_tx(self) -> None:
+        """Immediately stop transmitting — abort CW and drop PTT (emergency stop).
+
+        Default does nothing; backends that can transmit override it. Callers treat
+        it as best-effort and never let it raise.
+        """
+        return None

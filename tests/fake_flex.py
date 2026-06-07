@@ -36,6 +36,7 @@ class FakeFlex:
         self.bands: dict[str, dict[str, str]] = {"20": {"rfpower": "100", "tunepower": "10"}}
         self.cwx_sent: list[str] = []  # decoded CW text we were asked to send
         self.cw_wpm: str | None = None
+        self.cwx_cleared = False
         self._server: asyncio.AbstractServer | None = None
         self._writers: set[asyncio.StreamWriter] = set()
 
@@ -101,6 +102,8 @@ class FakeFlex:
             self.cwx_sent.append(payload.replace("\x7f", " "))  # decode 0x7F -> space
         elif tokens[:2] == ["cwx", "wpm"]:
             self.cw_wpm = tokens[2]
+        elif tokens[:2] == ["cwx", "clear"]:
+            self.cwx_cleared = True
         # Acknowledge the command (0 == success).
         writer.write(f"R{seq}|0|\n".encode())
 

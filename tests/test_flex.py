@@ -76,6 +76,20 @@ async def test_send_cw_via_cwx():
     await fake.stop()
 
 
+async def test_stop_tx_clears_cwx():
+    fake = FakeFlex()
+    host, port = await fake.start()
+    radio = FlexRadio(host, port)
+    await radio.connect()
+
+    await radio.send_cw("CQ TEST W7ABC")
+    await radio.stop_tx()
+    assert fake.cwx_cleared is True
+
+    await radio.disconnect()
+    await fake.stop()
+
+
 async def test_discover_loopback():
     # Find a free UDP port, then run discovery on it and unicast a packet to it.
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

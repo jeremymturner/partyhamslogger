@@ -18,6 +18,7 @@ class FakeRigctld:
         self.passband = passband
         self.ptt = "0"
         self.morse: list[str] = []
+        self.morse_stopped = False
         self.levels: dict[str, str] = {}
         self._server: asyncio.AbstractServer | None = None
         self._writers: set[asyncio.StreamWriter] = set()
@@ -87,6 +88,9 @@ class FakeRigctld:
             text = line.split(" ", 1)[1] if " " in line else ""
             self.morse.append(text)
             return f"send_morse: {text}\nRPRT 0\n"
+        if cmd == "\\stop_morse":  # abort CW
+            self.morse_stopped = True
+            return "stop_morse:\nRPRT 0\n"
         if cmd == "L":  # set_level
             if len(args) >= 2:
                 self.levels[args[0]] = args[1]

@@ -233,6 +233,13 @@ class FlexRadio(Radio):
             await self._command(f"cwx wpm {wpm}")
         await self._command("cwx send " + text.replace(" ", "\x7f"))
 
+    async def stop_tx(self) -> None:
+        # Clear the CWX buffer — aborts CW in progress (best effort).
+        try:
+            await self._command("cwx clear")
+        except OSError:
+            pass
+
     # ------------------------------------------------------------------ #
     # Flex-specific info (the point of a native driver)
     # ------------------------------------------------------------------ #
