@@ -20,8 +20,10 @@ from PySide6.QtWidgets import QApplication, QDialog
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, build_session, open_session
 from partyhams.app.state import AppState, load_state, new_log_path, save_state
+from partyhams.radio.civ_protocol import CIV_ADDR_IC705, CIV_ADDR_IC7610
 from partyhams.radio.flex import FlexRadio
 from partyhams.radio.hamlib import HamlibRadio
+from partyhams.radio.icom_civ import IcomCIV
 from partyhams.ui.log_dialog import LogDialog
 from partyhams.ui.main_window import MainWindow
 from partyhams.ui.radio_dialog import RadioDialog
@@ -79,7 +81,11 @@ def _poller_from_radio(radio: dict | None) -> RadioPoller | None:
     if not radio:
         return None
     kind = radio.get("kind", "none")
-    host, _, port_str = radio.get("conn", "").partition(":")
+    conn = radio.get("conn", "").strip()
+    if kind in ("icom705", "icom7610"):  # conn is a serial port path
+        addr = CIV_ADDR_IC705 if kind == "icom705" else CIV_ADDR_IC7610
+        return RadioPoller(IcomCIV(conn, civ_address=addr))
+    host, _, port_str = conn.partition(":")
     host = host.strip() or None
     port = int(port_str) if port_str.strip().isdigit() else None
     if kind == "hamlib":

@@ -335,8 +335,11 @@ operator** · test gear = **Flex 6500, IC-705, IC-7610 (remote), FT-891** · bui
     `radio/flex.py`, validated against a fake Flex server. Verify with the 6500 via
     `make flex-spike`. (Still uses the shared `RadioPoller`/`Radio` interface, so it
     drops into the entry window like Hamlib.)
-  - ⏳ **Remaining:** Icom CI-V native driver (IC-705/7610), CW(CAT)+voice F-key
-    macros, and on-the-air testing across macOS/Windows/Linux.
+  - ✅ **Icom CI-V native driver — DONE.** One serial backend for IC-705 + IC-7610
+    (`radio/civ_protocol.py` + `radio/icom_civ.py`): BCD frame protocol, read/set
+    freq+mode, CW keying (0x17) + stop, PTT, echo-skipping; selectable in the radio
+    screen. Validated against a fake CI-V radio. (pyserial; real-hardware check TBD.)
+  - ⏳ **Remaining:** on-the-air testing across the radios and macOS/Windows/Linux.
 - **Phase 2:** Module #2 (mult-heavy: CQ WW or WPX) to validate the multiplier engine,
   band map + DX cluster, rate meters, run/S&P macro sets, SO2R/SO2V, N1MM UDP interop.
 - **Phase 3:** Digital integration (WSJT-X/fldigi), QRZ/CTY lookups, awards tracking,

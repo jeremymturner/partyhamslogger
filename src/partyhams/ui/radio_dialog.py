@@ -28,6 +28,8 @@ class RadioDialog(QDialog):
         self._radio.addItem("None — manual band/mode", "none")
         self._radio.addItem("Hamlib (rigctld)", "hamlib")
         self._radio.addItem("FlexRadio (native)", "flex")
+        self._radio.addItem("Icom IC-705 (CI-V)", "icom705")
+        self._radio.addItem("Icom IC-7610 (CI-V)", "icom7610")
         self._conn = QLineEdit()
         self._conn.setEnabled(False)
         self._radio.currentIndexChanged.connect(lambda _i: self._on_radio_changed())
@@ -67,6 +69,8 @@ class RadioDialog(QDialog):
             self._conn.setPlaceholderText("rigctld host:port (default 127.0.0.1:4532)")
         elif kind == "flex":
             self._conn.setPlaceholderText("radio IP (blank = auto-discover)")
+        elif kind in ("icom705", "icom7610"):
+            self._conn.setPlaceholderText("serial port (e.g. /dev/cu.usbmodem…)")
         else:
             self._conn.setPlaceholderText("")
 
