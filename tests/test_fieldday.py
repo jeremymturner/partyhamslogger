@@ -65,9 +65,24 @@ def test_qso_points_by_mode(fd):
     assert fd.qso_points(make_qso("K1A", mode=Mode.FT8)) == 2  # digital
 
 
-def test_no_multipliers(fd):
-    # Field Day sections are exchange data, not QSO-count multipliers.
-    assert fd.multipliers(make_qso("K1A")) == set()
+def test_sections_tracked_as_mults(fd):
+    # Sections are tracked (for the "work all sections" goal + new-mult highlight),
+    # keyed by the "section" exchange field name.
+    assert fd.multipliers(make_qso("K1A", exchange={"class": "2A", "section": "EPA"})) == {
+        ("section", "EPA")
+    }
+
+
+def test_sections_do_not_multiply_score(fd):
+    # Two QSOs in different sections, both CW (2 pts each), high power (x1).
+    qsos = [
+        make_qso("K1A", FREQ["20m"], Mode.CW, exchange={"class": "1A", "section": "EPA"}),
+        make_qso("K2B", FREQ["40m"], Mode.CW, exchange={"class": "1A", "section": "OR"}),
+    ]
+    config = ContestConfig(extra={"power": PowerCategory.HIGH.key})
+    summary = fd.score(qsos, config)
+    assert summary.mult_count == 2  # two sections tracked
+    assert summary.total == 4  # but score is just 4 points x1 — sections don't multiply
 
 
 def test_score_with_power_multiplier_and_bonus(fd):

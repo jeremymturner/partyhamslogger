@@ -49,11 +49,13 @@ def qso_to_adif(qso: QSO, config: ContestConfig) -> str:
         _field("BAND", _adif_band(qso.band_label)),
         _field("FREQ", f"{qso.freq_hz / 1_000_000:.6f}"),
         _field("MODE", _ADIF_MODE.get(qso.mode, qso.mode.value)),
-        _field("RST_SENT", qso.rst_sent),
-        _field("RST_RCVD", qso.rst_rcvd),
         _field("OPERATOR", qso.operator.upper()),
         _field("STATION_CALLSIGN", config.my_call.upper()),
     ]
+    if qso.rst_sent:
+        parts.append(_field("RST_SENT", qso.rst_sent))
+    if qso.rst_rcvd:
+        parts.append(_field("RST_RCVD", qso.rst_rcvd))
     sent = _exchange_string(config.sent_exchange)
     rcvd = _exchange_string(qso.exchange_rcvd)
     if sent:

@@ -23,6 +23,8 @@ ACCENT_HI = "#5ab9e9"
 AMBER = "#e0a83a"  # score highlight
 PEER = "#5aa9e6"  # QSOs from a networked peer
 DUPE = "#ff6b6b"
+MULT = "#5fd38d"  # new-multiplier highlight (green)
+MULT_BG = "#1d3326"  # field tint behind a new multiplier
 
 APP_QSS = f"""
 QWidget {{

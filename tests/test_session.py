@@ -63,6 +63,32 @@ async def test_score_uses_power_multiplier():
     assert s.score().total == 4
 
 
+async def test_new_mult_detection():
+    s = make_session()
+    # A section not yet worked is a new mult; an empty section is not.
+    assert s.new_mults("K1A", FREQ_20M, Mode.CW, {"class": "2A", "section": "EPA"}) == {
+        ("section", "EPA")
+    }
+    assert s.new_mults("K1A", FREQ_20M, Mode.CW, {"class": "2A", "section": ""}) == set()
+    # After logging EPA, it's no longer new (even on a different band).
+    await s.log_qso(
+        call="K1A", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "2A", "section": "EPA"}
+    )
+    assert s.new_mults("K9Z", FREQ_40M, Mode.USB, {"class": "1D", "section": "EPA"}) == set()
+    assert s.new_mults("K9Z", FREQ_40M, Mode.USB, {"class": "1D", "section": "OR"}) == {
+        ("section", "OR")
+    }
+
+
+async def test_field_day_logs_no_rst():
+    s = make_session()
+    await s.log_qso(
+        call="K1A", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1A", "section": "OR"}
+    )
+    qso = s.qsos()[0]
+    assert qso.rst_sent == "" and qso.rst_rcvd == ""
+
+
 async def test_partial_matches():
     s = make_session()
     for call in ("K1ABC", "K1AXY", "W2ZZZ"):

@@ -44,13 +44,14 @@ class LogSession:
         self.store = store
         self._listeners: list[Callable[[], None]] = []
         self._dupe_keys: set[tuple] = set()
+        self._mult_keys: set[tuple[str, str]] = set()
 
         engine.on_qso = self._on_applied
-        # Load the persisted log into the in-memory merge, clock, and dupe set.
+        # Load the persisted log into the in-memory merge, clock, and indexes.
         for qso in store.all(include_deleted=True):
             engine.log.apply(qso)
             engine.clock.update(qso.lamport)
-        self._rebuild_dupes()
+        self._rebuild_indexes()
 
     # ------------------------------------------------------------------ #
     # listeners / lifecycle
@@ -74,11 +75,15 @@ class LogSession:
     # ------------------------------------------------------------------ #
     def _on_applied(self, qso: QSO) -> None:
         self.store.upsert(qso)
-        self._rebuild_dupes()
+        self._rebuild_indexes()
         self._emit()
 
-    def _rebuild_dupes(self) -> None:
-        self._dupe_keys = {self.contest.dupe_key(q) for q in self.engine.log.qsos()}
+    def _rebuild_indexes(self) -> None:
+        qsos = self.engine.log.qsos()
+        self._dupe_keys = {self.contest.dupe_key(q) for q in qsos}
+        self._mult_keys = set()
+        for qso in qsos:
+            self._mult_keys |= self.contest.multipliers(qso)
 
     # ------------------------------------------------------------------ #
     # logging
@@ -93,13 +98,17 @@ class LogSession:
         rst_sent: str | None = None,
         rst_rcvd: str = "599",
     ) -> QSO:
+        if self.contest.exchanges_rst:
+            rs, rr = rst_sent or default_rst(mode), rst_rcvd
+        else:
+            rs = rr = ""  # contests like Field Day exchange no signal report
         return await self.engine.log_qso(
             call=call,
             freq_hz=freq_hz,
             mode=mode,
             exchange_rcvd=exchange,
-            rst_sent=rst_sent or default_rst(mode),
-            rst_rcvd=rst_rcvd,
+            rst_sent=rs,
+            rst_rcvd=rr,
         )
 
     # ------------------------------------------------------------------ #
@@ -129,6 +138,21 @@ class LogSession:
             uuid="", station_id="", operator="", call=call.upper(), freq_hz=freq_hz, mode=mode
         )
         return self.contest.dupe_key(probe) in self._dupe_keys
+
+    def new_mults(
+        self, call: str, freq_hz: int, mode: Mode, exchange: dict[str, str]
+    ) -> set[tuple[str, str]]:
+        """Multipliers a prospective QSO would newly add (empty if none/all worked)."""
+        probe = QSO(
+            uuid="",
+            station_id="",
+            operator="",
+            call=call.upper(),
+            freq_hz=freq_hz,
+            mode=mode,
+            exchange_rcvd={k: v for k, v in exchange.items() if v},
+        )
+        return {m for m in self.contest.multipliers(probe) if m not in self._mult_keys}
 
     def partial_matches(self, fragment: str, limit: int = 20) -> list[str]:
         """Worked calls beginning with ``fragment`` (a simple partial check)."""

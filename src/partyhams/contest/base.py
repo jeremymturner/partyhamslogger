@@ -61,6 +61,10 @@ class ContestDefinition(ABC):
     name: str = ""
     #: Cabrillo ``CONTEST:`` identifier, e.g. ``"ARRL-FD"``.
     cabrillo_name: str = ""
+    #: Whether a signal report (RST) is part of the exchange. Field Day = False.
+    exchanges_rst: bool = True
+    #: UI label for this contest's multipliers (e.g. "Zones", "Sections").
+    mult_label: str = "Mults"
 
     # --- exchange ---
     @abstractmethod
@@ -99,7 +103,12 @@ class ContestDefinition(ABC):
     def multipliers(self, qso: QSO) -> set[tuple[str, str]]:
         """Multipliers credited by this QSO as ``(mult_type, value)`` pairs.
 
-        Default: none. Mult-bearing contests (CQ WW, WPX) override this.
+        These are *tracked* for the worked-mult counter and the new-multiplier
+        highlight in the entry window. Whether they actually multiply the score is
+        up to :meth:`score` — e.g. Field Day exposes sections here (so working a
+        new one lights up) but its score doesn't multiply by them. ``mult_type``
+        should match the exchange field name where applicable, so the UI can tint
+        the right field. Default: none.
         """
         return set()
 

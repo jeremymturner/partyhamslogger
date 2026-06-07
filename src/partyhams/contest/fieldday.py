@@ -77,6 +77,8 @@ class FieldDay(ContestDefinition):
     id = "arrl-field-day"
     name = "ARRL Field Day"
     cabrillo_name = "ARRL-FD"
+    exchanges_rst = False  # Field Day exchange is class + section only — no RST
+    mult_label = "Sections"
 
     def exchange_fields(self) -> list[ExchangeField]:
         return [
@@ -95,7 +97,12 @@ class FieldDay(ContestDefinition):
     def qso_points(self, qso: QSO) -> int:
         return _POINTS[qso.mode_group]
 
-    # No QSO-count multipliers in Field Day — base class default (none) is correct.
+    def multipliers(self, qso: QSO) -> set[tuple[str, str]]:
+        # Sections do NOT multiply the Field Day score (see ``score`` below), but
+        # working all ARRL/RAC sections is the event's secondary goal, so we track
+        # them here to drive the "Sections" counter and the new-mult highlight.
+        section = qso.exchange_rcvd.get("section", "").upper()
+        return {("section", section)} if section else set()
 
     def power_category(self, config: ContestConfig) -> PowerCategory:
         raw = config.extra.get("power", PowerCategory.LOW_150W.key)

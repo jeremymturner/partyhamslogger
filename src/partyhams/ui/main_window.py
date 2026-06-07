@@ -32,12 +32,10 @@ from PySide6.QtWidgets import (
 
 from partyhams.app.session import LogSession
 from partyhams.core.models import Band, Mode, band_by_label
-from partyhams.ui.style import ACCENT, AMBER, DUPE, PEER, TEXT
+from partyhams.ui.style import ACCENT, AMBER, DUPE, MULT, MULT_BG, PEER, TEXT
 
 # Modes offered in the entry row.
 _ENTRY_MODES = [Mode.CW, Mode.USB, Mode.LSB, Mode.FM, Mode.RTTY, Mode.FT8]
-
-_LOG_COLUMNS = ["UTC", "Call", "Band", "Mode", "RST S", "RST R", "Exchange", "Op"]
 
 
 class MainWindow(QMainWindow):
@@ -47,6 +45,12 @@ class MainWindow(QMainWindow):
         self._on_close = on_close
         self.setWindowTitle(f"PartyHams Logger — {session.config.my_call} — {session.contest.name}")
         self.resize(900, 560)
+
+        # Log columns adapt to the contest (Field Day has no RST exchange).
+        self._columns = ["UTC", "Call", "Band", "Mode"]
+        if session.contest.exchanges_rst:
+            self._columns += ["RST S", "RST R"]
+        self._columns += ["Exchange", "Op"]
 
         root = QWidget()
         layout = QVBoxLayout(root)
@@ -82,7 +86,7 @@ class MainWindow(QMainWindow):
         self._call = QLineEdit()
         self._call.setPlaceholderText("Call")
         self._call.setMaximumWidth(140)
-        self._call.textChanged.connect(self._on_call_changed)
+        self._call.textChanged.connect(lambda *_: self._refresh_indicators())
         self._call.returnPressed.connect(self._advance_or_log)
         hbox.addWidget(QLabel("Call"))
         hbox.addWidget(self._call)
@@ -94,6 +98,7 @@ class MainWindow(QMainWindow):
             edit.setMaximumWidth(90)
             edit.setPlaceholderText(field.label)
             edit.returnPressed.connect(self._advance_or_log)
+            edit.textChanged.connect(lambda *_: self._refresh_indicators())
             self._exchange_edits[field.name] = edit
             hbox.addWidget(QLabel(field.label))
             hbox.addWidget(edit)
@@ -105,20 +110,24 @@ class MainWindow(QMainWindow):
         default_band = self._band.findText("20m")  # busiest FD band
         if default_band >= 0:
             self._band.setCurrentIndex(default_band)
-        self._band.currentIndexChanged.connect(lambda _i: self._update_dupe_indicator())
+        self._band.currentIndexChanged.connect(lambda *_: self._refresh_indicators())
         hbox.addWidget(QLabel("Band"))
         hbox.addWidget(self._band)
 
         self._mode = QComboBox()
         for mode in _ENTRY_MODES:
             self._mode.addItem(mode.value, mode)
-        self._mode.currentIndexChanged.connect(lambda _i: self._update_dupe_indicator())
+        self._mode.currentIndexChanged.connect(lambda *_: self._refresh_indicators())
         hbox.addWidget(QLabel("Mode"))
         hbox.addWidget(self._mode)
 
+        # Status indicators: new-multiplier (green) and dupe (red).
+        self._mult = QLabel()
+        self._mult.setStyleSheet(f"font-weight: bold; color: {MULT};")
+        hbox.addWidget(self._mult)
         self._dupe = QLabel()
         self._dupe.setMinimumWidth(60)
-        self._dupe.setStyleSheet("font-weight: bold;")
+        self._dupe.setStyleSheet(f"font-weight: bold; color: {DUPE};")
         hbox.addWidget(self._dupe)
 
         log_btn = QPushButton("Log (Enter)")
@@ -129,8 +138,8 @@ class MainWindow(QMainWindow):
         return row
 
     def _build_log_table(self) -> QTableWidget:
-        self._table = QTableWidget(0, len(_LOG_COLUMNS))
-        self._table.setHorizontalHeaderLabels(_LOG_COLUMNS)
+        self._table = QTableWidget(0, len(self._columns))
+        self._table.setHorizontalHeaderLabels(self._columns)
         self._table.verticalHeader().setVisible(False)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -172,16 +181,24 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # entry behavior
     # ------------------------------------------------------------------ #
-    def _on_call_changed(self, _text: str) -> None:
-        self._update_dupe_indicator()
-
-    def _update_dupe_indicator(self) -> None:
+    def _refresh_indicators(self) -> None:
+        """Update the dupe + new-multiplier badges and tint mult exchange fields."""
         call = self._call.text().strip().upper()
-        if call and self.session.is_dupe(call, self._current_freq(), self._current_mode()):
-            self._dupe.setText("● DUPE")
-            self._dupe.setStyleSheet(f"font-weight: bold; color: {DUPE};")
-        else:
-            self._dupe.setText("")
+        freq, mode = self._current_freq(), self._current_mode()
+        is_dupe = bool(call) and self.session.is_dupe(call, freq, mode)
+        self._dupe.setText("● DUPE" if is_dupe else "")
+
+        exchange = {name: e.text().strip().upper() for name, e in self._exchange_edits.items()}
+        new = self.session.new_mults(call, freq, mode, exchange) if call and not is_dupe else set()
+        new_types = {mtype for mtype, _ in new}
+        self._mult.setText("★ NEW " + "/".join(sorted(t.upper() for t in new_types)) if new else "")
+        # Tint the exchange field(s) that carry a new multiplier.
+        for field in self.session.contest.exchange_fields():
+            edit = self._exchange_edits[field.name]
+            if field.name in new_types and edit.text().strip():
+                edit.setStyleSheet(f"border: 1px solid {MULT}; background-color: {MULT_BG};")
+            else:
+                edit.setStyleSheet("")
 
     def _advance_or_log(self) -> None:
         if not self._call.text().strip():
@@ -224,7 +241,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     def refresh(self) -> None:
         self._update_score_bar()
-        self._update_dupe_indicator()
+        self._refresh_indicators()
         self._reload_table()
 
     def _update_score_bar(self) -> None:
@@ -234,10 +251,12 @@ class MainWindow(QMainWindow):
         peer_txt = f" &nbsp;|&nbsp; Peers <b style='color:{PEER}'>{peers}</b>" if peers else ""
         call = self.session.config.my_call
         name = self.session.contest.name
+        mult_label = self.session.contest.mult_label
         self._score_label.setText(
             f"<b style='color:{ACCENT}'>{call}</b> &nbsp;·&nbsp; {name} &nbsp;|&nbsp; "
             f"QSOs <b style='color:{TEXT}'>{s.qso_count}</b> &nbsp; "
             f"Pts <b style='color:{TEXT}'>{s.qso_points}</b> &nbsp; "
+            f"{mult_label} <b style='color:{MULT}'>{s.mult_count}</b> &nbsp; "
             f"Pwr <b style='color:{AMBER}'>×{mult}</b> &nbsp; "
             f"Score <b style='color:{AMBER}'>{s.total}</b>{peer_txt}"
         )
@@ -249,16 +268,10 @@ class MainWindow(QMainWindow):
             exchange = " ".join(
                 q.exchange_rcvd.get(f.name, "") for f in self.session.contest.exchange_fields()
             )
-            values = [
-                q.timestamp.strftime("%H:%M:%S"),
-                q.call,
-                q.band_label,
-                q.mode.value,
-                q.rst_sent,
-                q.rst_rcvd,
-                exchange.strip(),
-                q.operator,
-            ]
+            values = [q.timestamp.strftime("%H:%M:%S"), q.call, q.band_label, q.mode.value]
+            if self.session.contest.exchanges_rst:
+                values += [q.rst_sent, q.rst_rcvd]
+            values += [exchange.strip(), q.operator]
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)
                 if q.operator != self.session.config.my_call:

@@ -193,12 +193,13 @@ networking core. Specifics the engine must model:
   alt-power, NTS messages, web submission, etc. (a checklist the app tallies).
 - **Score:** `(QSO points × power multiplier) + bonus points`.
 
-> **Important nuance:** Field Day has **no QSO-count multipliers** (sections are
-> exchange data, *not* mults). So it stress-tests networking, multi-band/mode
-> dupe checking, power multiplier, and bonus tallying — but **not** the
-> multiplier-tracking subsystem. To exercise that, the **second** module should be
-> a mult-heavy contest (CQ WW = zones+DXCC, or WPX = prefixes+serials). Build the
-> mult engine generic now; validate it with module #2.
+> **Important nuance:** Field Day has **no *scoring* multipliers** — sections do
+> not multiply the score (it's `QSO pts × power + bonus`). But working all ARRL/RAC
+> sections is the event's secondary goal, so sections **are** tracked as
+> multipliers for the "Sections" counter and the new-mult highlight in the entry
+> window; the contest's `score()` simply doesn't multiply by them. A mult-heavy
+> module where mults *do* multiply (CQ WW zones+DXCC, WPX prefixes) is still the
+> right way to validate the scoring path — that's module #2.
 
 ---
 
