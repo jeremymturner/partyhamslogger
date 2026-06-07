@@ -82,7 +82,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_score_bar())
         layout.addWidget(self._build_entry_row())
         layout.addWidget(self._build_log_table(), stretch=1)
-        layout.addLayout(self._build_buttons())
         self.setCentralWidget(root)
 
         session.add_listener(self.refresh)
@@ -95,9 +94,12 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def _build_menu(self) -> None:
+        file_menu = self.menuBar().addMenu("File")
+        file_menu.addAction("Export ADIF…", self._export_adif)
+        file_menu.addAction("Export Cabrillo…", self._export_cabrillo)
+
         radio_menu = self.menuBar().addMenu("Radio")
-        action = radio_menu.addAction("Select Radio…")
-        action.triggered.connect(self._radio_menu_clicked)
+        radio_menu.addAction("Select Radio…", self._radio_menu_clicked)
 
     def _radio_menu_clicked(self) -> None:
         if self.on_change_radio is not None:
@@ -229,17 +231,6 @@ class MainWindow(QMainWindow):
         self._table.setShowGrid(False)
         self._table.horizontalHeader().setStretchLastSection(True)
         return self._table
-
-    def _build_buttons(self) -> QHBoxLayout:
-        hbox = QHBoxLayout()
-        adif_btn = QPushButton("Export ADIF…")
-        adif_btn.clicked.connect(self._export_adif)
-        cab_btn = QPushButton("Export Cabrillo…")
-        cab_btn.clicked.connect(self._export_cabrillo)
-        hbox.addStretch(1)
-        hbox.addWidget(adif_btn)
-        hbox.addWidget(cab_btn)
-        return hbox
 
     # ------------------------------------------------------------------ #
     # helpers
