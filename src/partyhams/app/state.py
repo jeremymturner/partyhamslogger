@@ -45,6 +45,9 @@ class AppState:
     autoexport_minutes: int = 5
     #: Only auto-export when there are new QSOs since the last auto-export.
     autoexport_only_if_new: bool = True
+    #: QRZ.com XML-API credentials for callsign lookups (empty => disabled).
+    qrz_username: str = ""
+    qrz_password: str = ""
 
 
 def load_state(path: Path = STATE_FILE) -> AppState:
@@ -63,6 +66,8 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         autoexport_enabled=data.get("autoexport_enabled", True),
         autoexport_minutes=data.get("autoexport_minutes", 5),
         autoexport_only_if_new=data.get("autoexport_only_if_new", True),
+        qrz_username=data.get("qrz_username", ""),
+        qrz_password=data.get("qrz_password", ""),
     )
 
 
@@ -79,6 +84,8 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "autoexport_enabled": state.autoexport_enabled,
         "autoexport_minutes": state.autoexport_minutes,
         "autoexport_only_if_new": state.autoexport_only_if_new,
+        "qrz_username": state.qrz_username,
+        "qrz_password": state.qrz_password,
     }
     path.write_text(json.dumps(payload, indent=2))
 

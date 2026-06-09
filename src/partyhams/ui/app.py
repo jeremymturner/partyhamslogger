@@ -202,6 +202,8 @@ def run() -> int:
                 state.autoexport_minutes,
                 state.autoexport_only_if_new,
             )
+            window.on_change_qrz = _change_qrz
+            window.set_qrz_credentials(state.qrz_username, state.qrz_password)
             window.show()
             ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
             window.set_poller(ctx["poller"])
@@ -306,6 +308,12 @@ def run() -> int:
         state.autoexport_enabled = enabled
         state.autoexport_minutes = minutes
         state.autoexport_only_if_new = only_if_new
+        save_state(state)
+
+    # --- QRZ credentials (persisted) ---
+    def _change_qrz(username: str, password: str) -> None:
+        state.qrz_username = username
+        state.qrz_password = password
         save_state(state)
 
     # --- theme change (live) ---

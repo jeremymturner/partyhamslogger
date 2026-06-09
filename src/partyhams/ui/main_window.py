@@ -45,6 +45,7 @@ from partyhams.core.models import (
     utcnow,
 )
 from partyhams.export import timestamped_adif_name
+from partyhams.qrz import QrzClient, format_record
 from partyhams.radio.base import Capability, RadioState
 from partyhams.refdata import RefData
 from partyhams.ui import shortcuts as sc
@@ -148,6 +149,13 @@ class MainWindow(QMainWindow):
         # Imported via Tools menu; loaded from disk on launch (missing => empty).
         self._refdata = RefData()
         self._refdata.load()
+        # QRZ.com lookup: credentials come from app state; lookups are debounced
+        # and run in the background, surfacing results in the status bar.
+        self._qrz = QrzClient()
+        self._qrz_last_call = ""  # debounce: don't re-look-up the same call
+        #: Set by the app: on_change_qrz(username, password) persists credentials.
+        self.on_change_qrz: Callable[[str, str], None] | None = None
+        self._qrz_dialog = None  # the QRZ login dialog while open
         #: Set by the app to no-arg callbacks that switch radio / log.
         self.on_change_radio: Callable[[], None] | None = None
         self.on_new_log: Callable[[], None] | None = None
@@ -212,6 +220,7 @@ class MainWindow(QMainWindow):
         self.set_poller(radio_poller)
         self._setup_auto_export()
         self._setup_autocq()
+        self._setup_qrz()
         self._call.setFocus()
         self.refresh()
 
@@ -281,6 +290,57 @@ class MainWindow(QMainWindow):
             self._fire_macro(1)
         else:
             self._stop_autocq()
+
+    # ------------------------------------------------------------------ #
+    # QRZ.com callsign lookup (debounced, background)
+    # ------------------------------------------------------------------ #
+    def _setup_qrz(self) -> None:
+        """Create the (stopped) debounce timer that fires a QRZ lookup."""
+        self._qrz_timer = QTimer(self)
+        self._qrz_timer.setSingleShot(True)
+        self._qrz_timer.setInterval(600)  # ms pause before looking up
+        self._qrz_timer.timeout.connect(self._qrz_lookup_now)
+
+    def set_qrz_credentials(self, username: str, password: str) -> None:
+        """Apply saved/edited QRZ credentials; clears any cached session key."""
+        self._qrz.username = username
+        self._qrz.password = password
+        self._qrz.key = None
+        self._qrz_last_call = ""
+
+    def _qrz_enabled(self) -> bool:
+        return bool(self._qrz.username and self._qrz.password)
+
+    def _on_call_qrz(self) -> None:
+        """Debounce a QRZ lookup on a short pause after the call changes."""
+        if not self._qrz_enabled():
+            return
+        call = self._call.text().strip().upper()
+        if not call or call == self._qrz_last_call:
+            return
+        self._qrz_timer.start()  # (re)start the debounce; fires after the pause
+
+    def _qrz_lookup_now(self) -> None:
+        """Kick off a background QRZ lookup for the current callsign."""
+        call = self._call.text().strip().upper()
+        if not call or not self._qrz_enabled() or call == self._qrz_last_call:
+            return
+        self._qrz_last_call = call
+        if self._loop is None or not self._loop.is_running():
+            return  # no loop (tests) -> skip the network call
+        self._loop.create_task(self._do_qrz_lookup(call))
+
+    async def _do_qrz_lookup(self, call: str) -> None:
+        """Run the (blocking) QRZ lookup off the UI thread and show the result."""
+        record = await asyncio.get_event_loop().run_in_executor(
+            None, self._qrz.lookup, call
+        )
+        if call != self._call.text().strip().upper():
+            return  # the operator moved on; don't clobber a newer entry
+        if record is not None:
+            self.statusBar().showMessage(format_record(record), 8000)
+        elif self._qrz.last_error:
+            self.statusBar().showMessage(self._qrz.last_error, 4000)
 
     def _auto_export_adif(self) -> None:
         path = getattr(self.session.store, "path", ":memory:")
@@ -669,6 +729,8 @@ class MainWindow(QMainWindow):
         self._view_menu.addAction("Font…", self._choose_font)
 
         tools_menu = self.menuBar().addMenu("Tools")
+        tools_menu.addAction("QRZ Login…", self._edit_qrz)
+        tools_menu.addSeparator()
         ref_menu = tools_menu.addMenu("Reference Data")
         ref_menu.addAction("Import Super Check Partial…", self._import_scp)
         ref_menu.addAction("Import city.dat…", self._import_city)
@@ -908,6 +970,7 @@ class MainWindow(QMainWindow):
         make_upper(self._call)
         self._call.textChanged.connect(lambda *_: self._refresh_indicators())
         self._call.textChanged.connect(self._on_call_typed)
+        self._call.textChanged.connect(lambda *_: self._on_call_qrz())
         self._call.returnPressed.connect(self._on_enter)
         hbox.addWidget(QLabel("Call"))
         hbox.addWidget(self._call)
@@ -1265,6 +1328,28 @@ class MainWindow(QMainWindow):
         if path:
             Path(path).write_text(self.session.export_cabrillo())
             self.statusBar().showMessage(f"Exported Cabrillo to {path}", 4000)
+
+    def _edit_qrz(self) -> None:
+        from partyhams.ui.qrz_dialog import QrzDialog
+
+        dialog = QrzDialog(self._qrz.username, self._qrz.password, parent=self)
+        self._qrz_dialog = dialog  # keep alive while open
+        dialog.finished.connect(lambda result: self._qrz_done(dialog, result))
+        dialog.open()
+
+    def _qrz_done(self, dialog, result: int) -> None:
+        self._qrz_dialog = None
+        if result != QDialog.DialogCode.Accepted.value:
+            return
+        username, password = dialog.settings()
+        self.set_qrz_credentials(username, password)
+        if self.on_change_qrz is not None:
+            self.on_change_qrz(username, password)  # app persists it
+        if self._qrz_enabled():
+            self.statusBar().showMessage(f"QRZ login set for {username}", 3000)
+            self._qrz_lookup_now()  # look up the current call right away
+        else:
+            self.statusBar().showMessage("QRZ lookups disabled", 3000)
 
     def _edit_autoexport(self) -> None:
         from partyhams.ui.autoexport_dialog import AutoExportDialog
