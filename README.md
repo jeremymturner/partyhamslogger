@@ -42,7 +42,9 @@ radio** (Hamlib, FlexRadio, or None for manual band/mode). Both the current log
 and the radio choice are remembered (under `~/.partyhams/`), so the next launch
 reopens your log straight into the keyboard-first entry window: type the call,
 Enter walks the exchange fields, Enter logs. Live score and dupe checking update
-as you go; **Export ADIF / Cabrillo** when you're done.
+as you go; **Export ADIF / Cabrillo** when you're done. The log is also
+auto-saved to a timestamped ADIF backup every 5 minutes (in an `adif-backups/`
+folder next to the log file) so a crash never costs you more than a few QSOs.
 
 ## Getting started (dev)
 

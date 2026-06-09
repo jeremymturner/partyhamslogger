@@ -7,11 +7,23 @@ the standard ``STX_STRING`` / ``SRX_STRING`` fields.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
+from datetime import datetime
 
 from partyhams import __version__
 from partyhams.contest.base import ContestConfig, ContestDefinition
 from partyhams.core.models import QSO, Mode
+
+
+def timestamped_adif_name(call: str, contest_id: str, when: datetime) -> str:
+    """A dated ADIF filename, e.g. ``W7ABC-arrl-field-day-20260607-143012.adi``.
+
+    The timestamp encodes ``YYYYMMDD`` and ``HHMMSS`` so periodic auto-exports
+    sort chronologically and never overwrite one another.
+    """
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", call).strip("_") or "log"
+    return f"{safe}-{contest_id}-{when.strftime('%Y%m%d-%H%M%S')}.adi"
 
 # our Mode -> ADIF MODE enumeration
 _ADIF_MODE: dict[Mode, str] = {

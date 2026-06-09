@@ -35,7 +35,15 @@ from PySide6.QtWidgets import (
 from partyhams.app.macros import bank_key, esm_step, expand, load_macros, save_macros
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, default_rst
-from partyhams.core.models import Band, Mode, band_by_label, band_for_freq, mode_group_for
+from partyhams.core.models import (
+    Band,
+    Mode,
+    band_by_label,
+    band_for_freq,
+    mode_group_for,
+    utcnow,
+)
+from partyhams.export import timestamped_adif_name
 from partyhams.radio.base import Capability, RadioState
 from partyhams.ui import shortcuts as sc
 from partyhams.ui.macros_dialog import MacrosDialog
@@ -122,8 +130,32 @@ class MainWindow(QMainWindow):
 
         self._build_network_panel()
         self.set_poller(radio_poller)
+        self._setup_auto_export()
         self._call.setFocus()
         self.refresh()
+
+    def _setup_auto_export(self) -> None:
+        """Periodically snapshot the log to a timestamped ADIF backup."""
+        self._auto_export_timer = QTimer(self)
+        self._auto_export_timer.setInterval(5 * 60 * 1000)  # every 5 minutes
+        self._auto_export_timer.timeout.connect(self._auto_export_adif)
+        self._auto_export_timer.start()
+
+    def _auto_export_adif(self) -> None:
+        path = getattr(self.session.store, "path", ":memory:")
+        if path == ":memory:" or not self.session.qsos():
+            return  # nothing worth backing up (transient or empty log)
+        try:
+            out_dir = Path(path).resolve().parent / "adif-backups"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            name = timestamped_adif_name(
+                self.session.config.my_call, self.session.contest.id, utcnow()
+            )
+            target = out_dir / name
+            target.write_text(self.session.export_adif())
+            self.statusBar().showMessage(f"Auto-exported ADIF → {target.name}", 3000)
+        except OSError as exc:  # noqa: BLE001 - a backup failure must never disrupt logging
+            self.statusBar().showMessage(f"Auto-export failed: {exc}", 4000)
 
     def _build_network_panel(self) -> None:
         """Dockable side panel: station roster + chat (toggle via the View menu)."""

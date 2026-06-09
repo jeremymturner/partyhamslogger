@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS meta (
 
 class SqliteLog:
     def __init__(self, path: str | Path = ":memory:") -> None:
+        self.path = str(path)  # ":memory:" for transient logs (e.g. tests)
         self._conn = sqlite3.connect(str(path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)

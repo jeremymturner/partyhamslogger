@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from partyhams.app.session import build_session
 from partyhams.core.models import Mode
+from partyhams.export import timestamped_adif_name
 
 FREQ_20M = 14_040_000
+
+
+def test_timestamped_adif_name():
+    when = datetime(2026, 6, 7, 14, 30, 12)
+    assert timestamped_adif_name("W7ABC", "arrl-field-day", when) == (
+        "W7ABC-arrl-field-day-20260607-143012.adi"
+    )
+    # Slashes/odd characters in the call are sanitised; empty call falls back.
+    assert timestamped_adif_name("VK3/AB1C", "cqww", when).startswith("VK3_AB1C-cqww-")
+    assert timestamped_adif_name("", "x", when).startswith("log-x-")
 
 
 async def make_logged_session():
