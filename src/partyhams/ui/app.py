@@ -194,6 +194,12 @@ def run() -> int:
             window.on_change_theme = _change_theme
             window.on_autocq_interval = _change_autocq_interval
             window.set_autocq_interval(state.autocq_interval)
+            window.on_change_autoexport = _change_autoexport
+            window.set_autoexport(
+                state.autoexport_enabled,
+                state.autoexport_minutes,
+                state.autoexport_only_if_new,
+            )
             window.show()
             ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
             window.set_poller(ctx["poller"])
@@ -291,6 +297,13 @@ def run() -> int:
     # --- Auto-CQ interval (live + persisted) ---
     def _change_autocq_interval(seconds: int) -> None:
         state.autocq_interval = seconds
+        save_state(state)
+
+    # --- ADIF auto-export settings (live + persisted) ---
+    def _change_autoexport(enabled: bool, minutes: int, only_if_new: bool) -> None:
+        state.autoexport_enabled = enabled
+        state.autoexport_minutes = minutes
+        state.autoexport_only_if_new = only_if_new
         save_state(state)
 
     # --- theme change (live) ---

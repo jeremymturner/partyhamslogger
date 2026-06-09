@@ -87,6 +87,31 @@ def should_autocq(run: bool, enabled: bool, call_text: str) -> bool:
     return bool(run and enabled and not call_text.strip())
 
 
+#: Allowed periodic ADIF auto-export interval bounds (minutes).
+AUTOEXPORT_MIN = 5
+AUTOEXPORT_MAX = 60
+
+
+def clamp_export_minutes(minutes: int) -> int:
+    """Clamp an auto-export interval into the supported 5..60 minute range."""
+    return max(AUTOEXPORT_MIN, min(AUTOEXPORT_MAX, int(minutes)))
+
+
+def should_autoexport(
+    enabled: bool, only_if_new: bool, current_count: int, last_count: int
+) -> bool:
+    """Whether a periodic auto-export should write now (timer/log checks aside).
+
+    Disabled never exports. When "only if new" is set, export only if the QSO
+    count has increased since the last successful export; otherwise always.
+    """
+    if not enabled:
+        return False
+    if only_if_new and current_count <= last_count:
+        return False
+    return True
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -107,6 +132,13 @@ class MainWindow(QMainWindow):
         self._autocq_interval = 10  # seconds; set from app state via set_autocq_interval
         #: Set by the app: on_autocq_interval(secs) persists the chosen interval.
         self.on_autocq_interval: Callable[[int], None] | None = None
+        # Periodic ADIF auto-export settings (driven from app state).
+        self._autoexport_enabled = True
+        self._autoexport_minutes = 5  # clamped to 5..60 when applied
+        self._autoexport_only_if_new = True
+        self._autoexport_last_count = 0  # QSO count at the last successful export
+        #: Set by the app: on_change_autoexport(enabled, minutes, only_if_new).
+        self.on_change_autoexport: Callable[[bool, int, bool], None] | None = None
         self._sections_window: SectionsWindow | None = None
         #: Set by the app to no-arg callbacks that switch radio / log.
         self.on_change_radio: Callable[[], None] | None = None
@@ -122,6 +154,7 @@ class MainWindow(QMainWindow):
         self._log_dialog = None  # app keeps the open new/open-log dialog alive here
         self._shortcuts_dialog = None  # the Keyboard Shortcuts dialog while open
         self._about_dialog = None  # the About dialog while open
+        self._autoexport_dialog = None  # the Auto-export settings dialog while open
         try:
             self._loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -175,9 +208,23 @@ class MainWindow(QMainWindow):
     def _setup_auto_export(self) -> None:
         """Periodically snapshot the log to a timestamped ADIF backup."""
         self._auto_export_timer = QTimer(self)
-        self._auto_export_timer.setInterval(5 * 60 * 1000)  # every 5 minutes
         self._auto_export_timer.timeout.connect(self._auto_export_adif)
-        self._auto_export_timer.start()
+        self._apply_autoexport_timer()
+
+    def _apply_autoexport_timer(self) -> None:
+        """(Re)arm or stop the timer from the current auto-export settings."""
+        self._auto_export_timer.stop()
+        if self._autoexport_enabled:
+            minutes = clamp_export_minutes(self._autoexport_minutes)
+            self._auto_export_timer.start(minutes * 60 * 1000)
+
+    def set_autoexport(self, enabled: bool, minutes: int, only_if_new: bool) -> None:
+        """Apply saved/edited auto-export settings and re-arm the timer."""
+        self._autoexport_enabled = enabled
+        self._autoexport_minutes = clamp_export_minutes(minutes)
+        self._autoexport_only_if_new = only_if_new
+        if hasattr(self, "_auto_export_timer"):
+            self._apply_autoexport_timer()
 
     def _setup_autocq(self) -> None:
         """Create (stopped) the timer that repeats F1 while Auto-CQ is on."""
@@ -227,8 +274,16 @@ class MainWindow(QMainWindow):
 
     def _auto_export_adif(self) -> None:
         path = getattr(self.session.store, "path", ":memory:")
-        if path == ":memory:" or not self.session.qsos():
+        qsos = self.session.qsos()
+        if path == ":memory:" or not qsos:
             return  # nothing worth backing up (transient or empty log)
+        if not should_autoexport(
+            self._autoexport_enabled,
+            self._autoexport_only_if_new,
+            len(qsos),
+            self._autoexport_last_count,
+        ):
+            return  # disabled, or "only if new" and no QSOs added since last export
         try:
             out_dir = Path(path).resolve().parent / "adif-backups"
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -237,6 +292,7 @@ class MainWindow(QMainWindow):
             )
             target = out_dir / name
             target.write_text(self.session.export_adif())
+            self._autoexport_last_count = len(qsos)
             self.statusBar().showMessage(f"Auto-exported ADIF → {target.name}", 3000)
         except OSError as exc:  # noqa: BLE001 - a backup failure must never disrupt logging
             self.statusBar().showMessage(f"Auto-export failed: {exc}", 4000)
@@ -541,6 +597,7 @@ class MainWindow(QMainWindow):
         adif.setShortcut(QKeySequence(sc.EXPORT_ADIF))
         cabrillo = logs_menu.addAction("Export Cabrillo…", self._export_cabrillo)
         cabrillo.setShortcut(QKeySequence(sc.EXPORT_CABRILLO))
+        logs_menu.addAction("Auto-export…", self._edit_autoexport)
 
         radio_menu = self.menuBar().addMenu("Radio")
         select_radio = radio_menu.addAction("Select Radio…", self._radio_menu_clicked)
@@ -1038,3 +1095,29 @@ class MainWindow(QMainWindow):
         if path:
             Path(path).write_text(self.session.export_cabrillo())
             self.statusBar().showMessage(f"Exported Cabrillo to {path}", 4000)
+
+    def _edit_autoexport(self) -> None:
+        from partyhams.ui.autoexport_dialog import AutoExportDialog
+
+        dialog = AutoExportDialog(
+            self._autoexport_enabled,
+            self._autoexport_minutes,
+            self._autoexport_only_if_new,
+            parent=self,
+        )
+        self._autoexport_dialog = dialog  # keep alive while open
+        dialog.finished.connect(lambda result: self._autoexport_done(dialog, result))
+        dialog.open()
+
+    def _autoexport_done(self, dialog, result: int) -> None:
+        self._autoexport_dialog = None
+        if result != QDialog.DialogCode.Accepted.value:
+            return
+        enabled, minutes, only_if_new = dialog.settings()
+        self.set_autoexport(enabled, minutes, only_if_new)
+        if self.on_change_autoexport is not None:
+            self.on_change_autoexport(enabled, self._autoexport_minutes, only_if_new)
+        state = "on" if enabled else "off"
+        self.statusBar().showMessage(
+            f"Auto-export {state} ({self._autoexport_minutes} min)", 3000
+        )

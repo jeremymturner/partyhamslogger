@@ -36,6 +36,12 @@ class AppState:
     theme: str | None = None
     #: Auto-CQ repeat interval in seconds (clamped to 5..30 when used).
     autocq_interval: int = 10
+    #: Whether the periodic ADIF auto-export is enabled.
+    autoexport_enabled: bool = True
+    #: Auto-export interval in minutes (clamped to 5..60 when used).
+    autoexport_minutes: int = 5
+    #: Only auto-export when there are new QSOs since the last auto-export.
+    autoexport_only_if_new: bool = True
 
 
 def load_state(path: Path = STATE_FILE) -> AppState:
@@ -49,6 +55,9 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         recent_logs=data.get("recent_logs") or [],
         theme=data.get("theme"),
         autocq_interval=data.get("autocq_interval", 10),
+        autoexport_enabled=data.get("autoexport_enabled", True),
+        autoexport_minutes=data.get("autoexport_minutes", 5),
+        autoexport_only_if_new=data.get("autoexport_only_if_new", True),
     )
 
 
@@ -60,6 +69,9 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "recent_logs": state.recent_logs,
         "theme": state.theme,
         "autocq_interval": state.autocq_interval,
+        "autoexport_enabled": state.autoexport_enabled,
+        "autoexport_minutes": state.autoexport_minutes,
+        "autoexport_only_if_new": state.autoexport_only_if_new,
     }
     path.write_text(json.dumps(payload, indent=2))
 
