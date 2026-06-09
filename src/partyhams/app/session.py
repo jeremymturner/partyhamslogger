@@ -108,6 +108,10 @@ class LogSession:
                     counts[window] += 1
         return counts
 
+    def station_total(self, station_id: str) -> int:
+        """Total QSOs logged by a station across the entire log (no time window)."""
+        return sum(1 for qso in self.engine.log.qsos() if qso.station_id == station_id)
+
     def roster(self) -> list[dict]:
         """All known stations (self first), with operating state and QSO rates."""
         now = utcnow()
@@ -141,6 +145,7 @@ class LogSession:
             "is_self": is_self,
             "stale": stale,
             "rates": self.station_rates(sid, now),
+            "total": self.station_total(sid),
         }
 
     def operators(self) -> list[str]:

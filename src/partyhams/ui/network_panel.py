@@ -1,8 +1,8 @@
 """The network side panel: a station roster (top) and a chat box (bottom).
 
-Top: every station we've detected — operator, frequency, mode, and QSO counts in
-the last 5 / 15 / 30 / 60 minutes (our own row first). Bottom: a chat where a
-message goes to everyone by default, or directly to one operator.
+Top: every station we've detected — operator, frequency, mode, QSO counts in the
+last 15 / 60 minutes, and their all-time total in this log (our own row first).
+Bottom: a chat where a message goes to everyone by default, or to one operator.
 
 Data comes from the :class:`~partyhams.app.session.LogSession`; sending a chat
 calls :attr:`on_send_chat` (wired by the main window to post + broadcast).
@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from partyhams.app.session import LogSession
 from partyhams.ui.style import ACCENT, AMBER, MULT, PEER, TEXT_DIM
 
-_COLUMNS = ["Op", "Freq", "Mode", "15m", "30m", "60m"]
+_COLUMNS = ["Op", "Freq", "Mode", "15m", "60m", "All"]
 
 
 def _fmt_freq(freq_hz: int) -> str:
@@ -125,8 +125,8 @@ class NetworkPanel(QWidget):
                 _fmt_freq(r["freq_hz"]),
                 r["mode"] or "—",
                 str(rates[15]),
-                str(rates[30]),
                 str(rates[60]),
+                str(r["total"]),  # total QSOs by this station across the whole log
             ]
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)

@@ -53,6 +53,19 @@ def test_station_rates_windows():
     assert rates[60] == 4  # all four
 
 
+def test_station_total_counts_whole_log():
+    s = make_session()
+    now = utcnow()
+    sid = s.engine.station_id
+    # Four QSOs, one of them well outside every rate window.
+    for minutes in (2, 10, 20, 600):
+        q = make_qso("K1ABC", station_id=sid)
+        q.timestamp = now - timedelta(minutes=minutes)
+        s.engine.log.apply(q)
+    assert s.station_total(sid) == 4  # ignores time windows
+    assert s.station_total("someone-else") == 0
+
+
 def test_remote_status_appears_in_roster():
     bus = LoopbackBus()
     local = make_session()  # uses NullTransport; swap in a loopback transport
