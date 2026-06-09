@@ -78,3 +78,9 @@ A GitHub Actions matrix over `windows-latest`, `macos-13` (Intel),
 `macos-14` (Apple Silicon), and `ubuntu-latest` running the matching
 `make package*` target, then uploading `dist/*` as release assets, gives you
 all artifacts from one tag push.
+
+## Publishing a release
+
+To turn a build into a tagged GitHub release (with checksums, uploaded via the
+`gh` CLI), use `make release VERSION=v0.1.0` / `scripts/release.sh`. See
+[docs/RELEASING.md](RELEASING.md) for the full flow.
