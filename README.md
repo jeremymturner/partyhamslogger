@@ -50,6 +50,12 @@ interval, and an option to skip exports when no new QSOs have been logged).
 Pick a look under **View → Theme** — three dark and three light schemes, defaulting
 to match your OS appearance.
 
+There's lots more: networked multi-station log + chat sync, a DX-cluster window
+with click-to-tune, WSJT-X digital-mode integration, QRZ lookups, POTA, a
+contest calendar, an Auto-CQ, super-check-partial, and a per-station stats
+drill-down. The fastest tour is the built-in **Help → User Guide** (a screenshot
+per screen) — also browsable on disk under [docs/guide/](docs/guide/index.md).
+
 ## Getting started (dev)
 
 Requires Python 3.12+. Using [uv](https://docs.astral.sh/uv/):
