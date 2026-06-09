@@ -184,6 +184,7 @@ class MainWindow(QMainWindow):
     def _set_esm(self, on: bool) -> None:
         self._esm = on
         self._esm_sent = False
+        self._esm_badge.setVisible(on)
         self._update_fkey_bar()
         self.statusBar().showMessage(f"ESM {'on' if on else 'off'}", 2000)
 
@@ -529,6 +530,16 @@ class MainWindow(QMainWindow):
         hbox.addWidget(QLabel("Mode"))
         hbox.addWidget(self._mode)
 
+        log_btn = QPushButton("Log (Enter)")
+        log_btn.clicked.connect(self._try_log)
+        hbox.addWidget(log_btn)
+
+        # ESM indicator — visible only while ESM (Enter sends messages) is on.
+        self._esm_badge = QLabel("ESM")
+        self._esm_badge.setObjectName("esmBadge")
+        self._esm_badge.setVisible(self._esm)
+        hbox.addWidget(self._esm_badge)
+
         # Frequency readout (live from CAT when a radio is connected). Fixed width
         # so its content changing doesn't shift the row.
         self._freq = QLabel()
@@ -546,10 +557,6 @@ class MainWindow(QMainWindow):
         self._dupe.setFixedWidth(75)
         self._dupe.setStyleSheet(f"font-weight: bold; color: {DUPE};")
         hbox.addWidget(self._dupe)
-
-        log_btn = QPushButton("Log (Enter)")
-        log_btn.clicked.connect(self._try_log)
-        hbox.addWidget(log_btn)
 
         hbox.addStretch(1)
         return row

@@ -42,6 +42,15 @@ QWidget {{
 QMainWindow, QDialog {{ background-color: {BG}; }}
 QLabel {{ color: {TEXT_DIM}; background: transparent; }}
 
+/* ESM mode indicator — an amber pill shown while Enter-sends-messages is on. */
+QLabel#esmBadge {{
+    background-color: {AMBER};
+    color: #1f1606;
+    border-radius: 5px;
+    padding: 4px 10px;
+    font-weight: 700;
+}}
+
 QLabel#scoreBar {{
     background-color: {BG_DARK};
     color: {TEXT};
