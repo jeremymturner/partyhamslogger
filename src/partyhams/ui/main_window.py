@@ -47,6 +47,7 @@ from partyhams.export import timestamped_adif_name
 from partyhams.radio.base import Capability, RadioState
 from partyhams.ui import shortcuts as sc
 from partyhams.ui import style
+from partyhams.ui.about_dialog import AboutDialog
 from partyhams.ui.macros_dialog import MacrosDialog
 from partyhams.ui.network_panel import NetworkPanel
 from partyhams.ui.sections_window import SectionsWindow
@@ -96,6 +97,7 @@ class MainWindow(QMainWindow):
         self._radio_dialog = None  # app keeps the open radio dialog alive here
         self._log_dialog = None  # app keeps the open new/open-log dialog alive here
         self._shortcuts_dialog = None  # the Keyboard Shortcuts dialog while open
+        self._about_dialog = None  # the About dialog while open
         try:
             self._loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -487,6 +489,8 @@ class MainWindow(QMainWindow):
         help_menu = self.menuBar().addMenu("Help")
         shortcuts = help_menu.addAction("Keyboard Shortcuts…", self._show_shortcuts)
         shortcuts.setShortcut(QKeySequence(sc.SHORTCUTS))
+        help_menu.addSeparator()
+        help_menu.addAction("About PartyHams Logger…", self._show_about)
 
     def _build_theme_menu(self, view_menu) -> None:
         view_menu.addSeparator()
@@ -539,6 +543,12 @@ class MainWindow(QMainWindow):
         dialog = ShortcutsDialog(parent=self)
         self._shortcuts_dialog = dialog  # keep alive while open
         dialog.finished.connect(lambda _result: setattr(self, "_shortcuts_dialog", None))
+        dialog.open()
+
+    def _show_about(self) -> None:
+        dialog = AboutDialog(parent=self)
+        self._about_dialog = dialog  # keep alive while open
+        dialog.finished.connect(lambda _result: setattr(self, "_about_dialog", None))
         dialog.open()
 
     def _open_sections(self) -> None:
