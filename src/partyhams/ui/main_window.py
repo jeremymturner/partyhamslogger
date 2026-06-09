@@ -67,6 +67,26 @@ def _format_tx_status(word: str, key: int, label: str, text: str) -> str:
     return f"{word} — F{key}{label_part} — {text}"
 
 
+#: Allowed Auto-CQ repeat intervals (seconds) and the clamp bounds.
+AUTOCQ_INTERVALS = (5, 8, 10, 15, 20, 30)
+AUTOCQ_MIN = 5
+AUTOCQ_MAX = 30
+
+
+def clamp_autocq_interval(seconds: int) -> int:
+    """Clamp an Auto-CQ interval into the supported 5..30 second range."""
+    return max(AUTOCQ_MIN, min(AUTOCQ_MAX, int(seconds)))
+
+
+def should_autocq(run: bool, enabled: bool, call_text: str) -> bool:
+    """Whether the Auto-CQ timer should fire F1 right now.
+
+    Only in Run mode, only while enabled, and never while the operator has
+    started entering a callsign (we don't keep CQ-ing while working someone).
+    """
+    return bool(run and enabled and not call_text.strip())
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -83,6 +103,10 @@ class MainWindow(QMainWindow):
         self._run = True  # Run vs Search & Pounce (picks the macro bank)
         self._esm = False  # ESM: Enter sends the next message
         self._esm_sent = False  # have we sent our exchange/call this QSO?
+        self._autocq = False  # Auto-CQ: repeat F1 on a timer while in Run mode
+        self._autocq_interval = 10  # seconds; set from app state via set_autocq_interval
+        #: Set by the app: on_autocq_interval(secs) persists the chosen interval.
+        self.on_autocq_interval: Callable[[int], None] | None = None
         self._sections_window: SectionsWindow | None = None
         #: Set by the app to no-arg callbacks that switch radio / log.
         self.on_change_radio: Callable[[], None] | None = None
@@ -144,6 +168,7 @@ class MainWindow(QMainWindow):
         self._build_network_panel()
         self.set_poller(radio_poller)
         self._setup_auto_export()
+        self._setup_autocq()
         self._call.setFocus()
         self.refresh()
 
@@ -153,6 +178,52 @@ class MainWindow(QMainWindow):
         self._auto_export_timer.setInterval(5 * 60 * 1000)  # every 5 minutes
         self._auto_export_timer.timeout.connect(self._auto_export_adif)
         self._auto_export_timer.start()
+
+    def _setup_autocq(self) -> None:
+        """Create (stopped) the timer that repeats F1 while Auto-CQ is on."""
+        self._autocq_timer = QTimer(self)
+        self._autocq_timer.timeout.connect(self._autocq_tick)
+
+    def set_autocq_interval(self, seconds: int) -> None:
+        """Apply a saved/preset interval (clamped). Restarts the timer if live."""
+        self._autocq_interval = clamp_autocq_interval(seconds)
+        if self._autocq:
+            self._start_autocq()  # re-arm at the new interval
+
+    def _set_autocq(self, on: bool) -> None:
+        if on:
+            self._start_autocq()
+        else:
+            self._stop_autocq()
+
+    def _start_autocq(self) -> None:
+        self._autocq = True
+        if hasattr(self, "_autocq_action"):
+            self._autocq_action.setChecked(True)
+        self._autocq_timer.start(self._autocq_interval * 1000)
+        self.statusBar().showMessage(f"Auto-CQ on ({self._autocq_interval}s)", 2000)
+        self._fire_macro(1)  # send the first CQ immediately
+
+    def _stop_autocq(self) -> None:
+        was_on = self._autocq
+        self._autocq = False
+        self._autocq_timer.stop()
+        if hasattr(self, "_autocq_action"):
+            self._autocq_action.setChecked(False)
+        if was_on:
+            self.statusBar().showMessage("Auto-CQ stopped", 2000)
+
+    def _on_call_typed(self) -> None:
+        """Pause Auto-CQ the moment a callsign is being entered."""
+        if self._autocq and self._call.text().strip():
+            self._stop_autocq()
+
+    def _autocq_tick(self) -> None:
+        """Fire F1 if conditions still hold; otherwise stop the repeat."""
+        if should_autocq(self._run, self._autocq, self._call.text()):
+            self._fire_macro(1)
+        else:
+            self._stop_autocq()
 
     def _auto_export_adif(self) -> None:
         path = getattr(self.session.store, "path", ":memory:")
@@ -238,6 +309,8 @@ class MainWindow(QMainWindow):
         if run == self._run:
             return
         self._run = run
+        if not run:
+            self._stop_autocq()  # Auto-CQ only makes sense in Run mode
         self._update_fkey_bar()
 
     def _set_esm(self, on: bool) -> None:
@@ -257,6 +330,7 @@ class MainWindow(QMainWindow):
         stop.activated.connect(self._stop_tx)
 
     def _stop_tx(self) -> None:
+        self._stop_autocq()  # ESC always halts the Auto-CQ repeat
         radio = self._poller.radio if self._poller is not None else None
         if radio is None or self._loop is None or not self._loop.is_running():
             return
@@ -479,6 +553,7 @@ class MainWindow(QMainWindow):
         esm_action.setCheckable(True)
         esm_action.setShortcut(QKeySequence(sc.TOGGLE_ESM))
         esm_action.toggled.connect(self._set_esm)
+        self._build_autocq_menu(macros_menu)
 
         # The dock toggle is added to this menu later by _build_network_panel.
         self._view_menu = self.menuBar().addMenu("View")
@@ -491,6 +566,27 @@ class MainWindow(QMainWindow):
         shortcuts.setShortcut(QKeySequence(sc.SHORTCUTS))
         help_menu.addSeparator()
         help_menu.addAction("About PartyHams Logger…", self._show_about)
+
+    def _build_autocq_menu(self, macros_menu) -> None:
+        macros_menu.addSeparator()
+        self._autocq_action = macros_menu.addAction("Auto-CQ (repeat F1)")
+        self._autocq_action.setCheckable(True)
+        self._autocq_action.toggled.connect(self._set_autocq)
+        interval_menu = macros_menu.addMenu("Auto-CQ Interval")
+        self._autocq_group = QActionGroup(self)
+        self._autocq_group.setExclusive(True)
+        for secs in AUTOCQ_INTERVALS:
+            action = interval_menu.addAction(f"{secs}s")
+            action.setCheckable(True)
+            action.setChecked(secs == self._autocq_interval)
+            self._autocq_group.addAction(action)
+            action.triggered.connect(lambda _checked=False, s=secs: self._choose_autocq_interval(s))
+
+    def _choose_autocq_interval(self, seconds: int) -> None:
+        self.set_autocq_interval(seconds)
+        if self.on_autocq_interval is not None:
+            self.on_autocq_interval(self._autocq_interval)  # app persists it
+        self.statusBar().showMessage(f"Auto-CQ interval {self._autocq_interval}s", 2000)
 
     def _build_theme_menu(self, view_menu) -> None:
         view_menu.addSeparator()
@@ -617,6 +713,7 @@ class MainWindow(QMainWindow):
         self._call.setMaximumWidth(160)
         make_upper(self._call)
         self._call.textChanged.connect(lambda *_: self._refresh_indicators())
+        self._call.textChanged.connect(self._on_call_typed)
         self._call.returnPressed.connect(self._on_enter)
         hbox.addWidget(QLabel("Call"))
         hbox.addWidget(self._call)

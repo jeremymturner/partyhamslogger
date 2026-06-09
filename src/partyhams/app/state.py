@@ -34,6 +34,8 @@ class AppState:
     recent_logs: list[str] = field(default_factory=list)
     #: Selected UI theme name (None => follow the OS light/dark setting).
     theme: str | None = None
+    #: Auto-CQ repeat interval in seconds (clamped to 5..30 when used).
+    autocq_interval: int = 10
 
 
 def load_state(path: Path = STATE_FILE) -> AppState:
@@ -46,6 +48,7 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         radio=data.get("radio"),
         recent_logs=data.get("recent_logs") or [],
         theme=data.get("theme"),
+        autocq_interval=data.get("autocq_interval", 10),
     )
 
 
@@ -56,6 +59,7 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "radio": state.radio,
         "recent_logs": state.recent_logs,
         "theme": state.theme,
+        "autocq_interval": state.autocq_interval,
     }
     path.write_text(json.dumps(payload, indent=2))
 
