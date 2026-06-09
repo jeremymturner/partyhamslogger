@@ -56,6 +56,10 @@ from partyhams.ui.network_panel import NetworkPanel
 from partyhams.ui.sections_window import SectionsWindow
 from partyhams.ui.shortcuts import ShortcutsDialog
 from partyhams.ui.widgets import make_upper
+from partyhams.ui.wsjtx_panel import WsjtxPanel
+from partyhams.wsjtx.convert import qso_logged_to_record
+from partyhams.wsjtx.listener import WsjtxListener
+from partyhams.wsjtx.protocol import Decode, QSOLogged, Status
 
 # Modes offered in the entry row.
 _ENTRY_MODES = [Mode.CW, Mode.USB, Mode.LSB, Mode.FM, Mode.RTTY, Mode.FT8]
@@ -165,6 +169,16 @@ class MainWindow(QMainWindow):
         self._shortcuts_dialog = None  # the Keyboard Shortcuts dialog while open
         self._about_dialog = None  # the About dialog while open
         self._autoexport_dialog = None  # the Auto-export settings dialog while open
+        # WSJT-X UDP integration (digital modes). The listener is created on
+        # demand by set_wsjtx; _wsjtx_active flips the F-key bar -> info panel.
+        self._wsjtx_listener: WsjtxListener | None = None
+        self._wsjtx_enabled = False
+        self._wsjtx_port = 2237
+        self._wsjtx_active = False
+        self._wsjtx_id = ""  # the reporting WSJT-X instance id (for replies)
+        self._wsjtx_highlighted: set[str] = set()  # calls we've already colored
+        #: Set by the app: on_change_wsjtx(enabled, port) persists the choice.
+        self.on_change_wsjtx: Callable[[bool, int], None] | None = None
         try:
             self._loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -193,7 +207,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_score_bar())
         layout.addWidget(self._build_entry_row())
         layout.addWidget(self._build_log_table(), stretch=1)
-        layout.addWidget(self._build_fkey_bar())
+        self._fkey_bar = self._build_fkey_bar()
+        layout.addWidget(self._fkey_bar)
+        self._wsjtx_panel = WsjtxPanel()
+        self._wsjtx_panel.setVisible(False)
+        layout.addWidget(self._wsjtx_panel)
         self.setCentralWidget(root)
         self._setup_fkey_shortcuts()
 
@@ -651,6 +669,8 @@ class MainWindow(QMainWindow):
         select_radio = radio_menu.addAction("Select Radio…", self._radio_menu_clicked)
         select_radio.setShortcut(QKeySequence(sc.SELECT_RADIO))
 
+        self._build_wsjtx_menu()
+
         macros_menu = self.menuBar().addMenu("Macros")
         edit_macros = macros_menu.addAction("Edit Macros…", self._edit_macros)
         edit_macros.setShortcut(QKeySequence(sc.EDIT_MACROS))
@@ -703,6 +723,174 @@ class MainWindow(QMainWindow):
         if self.on_autocq_interval is not None:
             self.on_autocq_interval(self._autocq_interval)  # app persists it
         self.statusBar().showMessage(f"Auto-CQ interval {self._autocq_interval}s", 2000)
+
+    def _build_wsjtx_menu(self) -> None:
+        """The WSJT-X menu: toggle the UDP listener and set its port."""
+        menu = self.menuBar().addMenu("WSJT-X")
+        self._wsjtx_action = menu.addAction("Enable WSJT-X (UDP)")
+        self._wsjtx_action.setCheckable(True)
+        self._wsjtx_action.toggled.connect(self._toggle_wsjtx)
+        menu.addAction("Set UDP Port…", self._choose_wsjtx_port)
+
+    def _toggle_wsjtx(self, enabled: bool) -> None:
+        """Enable/disable the listener (menu handler) and persist the choice."""
+        self.set_wsjtx(enabled, self._wsjtx_port)
+        if self.on_change_wsjtx is not None:
+            self.on_change_wsjtx(self._wsjtx_enabled, self._wsjtx_port)
+
+    def _choose_wsjtx_port(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        port, ok = QInputDialog.getInt(
+            self, "WSJT-X UDP Port", "Port:", self._wsjtx_port, 1, 65535
+        )
+        if not ok:
+            return
+        self.set_wsjtx(self._wsjtx_enabled, port)
+        if self.on_change_wsjtx is not None:
+            self.on_change_wsjtx(self._wsjtx_enabled, self._wsjtx_port)
+
+    def set_wsjtx(self, enabled: bool, port: int) -> None:
+        """Apply WSJT-X settings: (re)start or stop the UDP listener.
+
+        Idempotent and safe without a running loop (tests): when there's no
+        asyncio loop the settings are stored but no socket is opened.
+        """
+        self._wsjtx_port = int(port)
+        self._wsjtx_enabled = bool(enabled)
+        if hasattr(self, "_wsjtx_action"):
+            self._wsjtx_action.setChecked(self._wsjtx_enabled)
+        if self._loop is None or not self._loop.is_running():
+            return  # headless/tests — nothing to bind
+        self._loop.create_task(self._restart_wsjtx())
+
+    async def stop_wsjtx(self) -> None:
+        """Stop the UDP listener (called during window teardown)."""
+        if self._wsjtx_listener is not None:
+            await self._wsjtx_listener.stop()
+            self._wsjtx_listener = None
+
+    async def _restart_wsjtx(self) -> None:
+        """Tear down any existing listener and start a fresh one if enabled."""
+        if self._wsjtx_listener is not None:
+            await self._wsjtx_listener.stop()
+            self._wsjtx_listener = None
+        if not self._wsjtx_enabled:
+            self._set_wsjtx_active(False)
+            return
+        listener = WsjtxListener(
+            port=self._wsjtx_port,
+            on_qso_logged=self._on_wsjtx_qso,
+            on_status=self._on_wsjtx_status,
+            on_decode=self._on_wsjtx_decode,
+        )
+        try:
+            await listener.start()
+        except OSError as exc:
+            self.statusBar().showMessage(f"WSJT-X listen failed: {exc}", 5000)
+            return
+        self._wsjtx_listener = listener
+        self.statusBar().showMessage(f"WSJT-X UDP listening on :{self._wsjtx_port}", 3000)
+
+    # --- WSJT-X message handlers (called from the asyncio thread) ---
+    def _on_wsjtx_qso(self, msg: QSOLogged) -> None:
+        """Log a WSJT-X-reported QSO into our log (dedup handled by the engine)."""
+        kwargs = qso_logged_to_record(msg)
+        if not kwargs["call"]:
+            return
+        try:
+            qso = self.session.record_qso(**kwargs)  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001 - never let a peer packet crash us
+            self.statusBar().showMessage(f"WSJT-X log error: {exc}", 4000)
+            return
+        self._broadcast(qso)
+        self.statusBar().showMessage(f"WSJT-X logged {kwargs['call']}", 3000)
+
+    def _on_wsjtx_status(self, status: Status) -> None:
+        """Track WSJT-X transmit state; flip to the info panel for data modes."""
+        self._wsjtx_id = status.id
+        group = mode_group_for(self._map_status_mode(status.mode))
+        active = group.value == "DIGITAL"
+        self._set_wsjtx_active(active)
+        if not active:
+            return
+        sending = status.tx_mode or status.mode
+        if status.dx_call:
+            sending = f"{status.dx_call} ({sending})"
+        self._wsjtx_panel.set_status(
+            mode=status.mode,
+            dial_freq=status.dial_freq,
+            tx_enabled=status.tx_enabled,
+            transmitting=status.transmitting,
+            tx_period_odd=status.tx_period_odd,
+            sending=sending if status.transmitting else "",
+        )
+
+    def _on_wsjtx_decode(self, decode: Decode) -> None:
+        """Show a decode line and highlight calls whose section we still need."""
+        if self._wsjtx_active:
+            snr = f"{decode.snr:+d}" if isinstance(decode.snr, int) else str(decode.snr)
+            self._wsjtx_panel.add_decode(f"{snr:>4} dB  {decode.message}")
+        self._maybe_highlight(decode)
+
+    @staticmethod
+    def _map_status_mode(mode: str) -> Mode:
+        from partyhams.wsjtx.convert import map_mode
+
+        return map_mode(mode)
+
+    def _set_wsjtx_active(self, active: bool) -> None:
+        """Swap the F-key bar for the WSJT-X panel (or back) when state changes."""
+        if active == self._wsjtx_active:
+            return
+        self._wsjtx_active = active
+        self._fkey_bar.setVisible(not active)
+        self._wsjtx_panel.setVisible(active)
+        if not active:
+            self._wsjtx_panel.clear_decodes()
+
+    def _maybe_highlight(self, decode: Decode) -> None:
+        """Best-effort: tell WSJT-X to color CQ candidates whose section we need.
+
+        Parses the calling station from a ``CQ ...`` decode and, if its section
+        is still unworked on this band/mode, sends a HighlightCallsign reply.
+        Sections aren't carried in FT8 decodes, so this colors *every* fresh CQ
+        candidate while we still have unworked sections — a prompt to call them.
+        """
+        listener = self._wsjtx_listener
+        if listener is None or not decode.message.upper().startswith("CQ"):
+            return
+        call = self._cq_call(decode.message)
+        if not call or call in self._wsjtx_highlighted:
+            return
+        if not self._have_unworked_sections():
+            return
+        listener.send_highlight(
+            self._wsjtx_id,
+            call,
+            background=(40, 90, 40, 255),  # green wash = "go work this one"
+            foreground=(255, 255, 255, 255),
+        )
+        self._wsjtx_highlighted.add(call)
+
+    @staticmethod
+    def _cq_call(message: str) -> str:
+        """Extract the calling station from a ``CQ [DX/dir] CALL [GRID]`` decode."""
+        tokens = message.split()
+        if not tokens or tokens[0].upper() != "CQ":
+            return ""
+        # Skip optional CQ qualifiers (e.g. "CQ DX", "CQ NA", "CQ TEST").
+        idx = 1
+        if idx < len(tokens) and len(tokens[idx]) <= 3 and tokens[idx].isalpha():
+            idx += 1
+        return tokens[idx].upper() if idx < len(tokens) else ""
+
+    def _have_unworked_sections(self) -> bool:
+        """True if at least one section's slot is still unworked (best-effort)."""
+        worked = self.session.section_status()
+        from partyhams.contest.sections import ARRL_SECTIONS
+
+        return len(worked) < len(ARRL_SECTIONS)
 
     def _build_theme_menu(self, view_menu) -> None:
         view_menu.addSeparator()

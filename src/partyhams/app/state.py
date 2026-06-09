@@ -45,6 +45,10 @@ class AppState:
     autoexport_minutes: int = 5
     #: Only auto-export when there are new QSOs since the last auto-export.
     autoexport_only_if_new: bool = True
+    #: Whether to listen for WSJT-X UDP messages (digital-mode integration).
+    wsjtx_enabled: bool = False
+    #: UDP port WSJT-X reports to (WSJT-X default is 2237).
+    wsjtx_port: int = 2237
 
 
 def load_state(path: Path = STATE_FILE) -> AppState:
@@ -63,6 +67,8 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         autoexport_enabled=data.get("autoexport_enabled", True),
         autoexport_minutes=data.get("autoexport_minutes", 5),
         autoexport_only_if_new=data.get("autoexport_only_if_new", True),
+        wsjtx_enabled=data.get("wsjtx_enabled", False),
+        wsjtx_port=data.get("wsjtx_port", 2237),
     )
 
 
@@ -79,6 +85,8 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "autoexport_enabled": state.autoexport_enabled,
         "autoexport_minutes": state.autoexport_minutes,
         "autoexport_only_if_new": state.autoexport_only_if_new,
+        "wsjtx_enabled": state.wsjtx_enabled,
+        "wsjtx_port": state.wsjtx_port,
     }
     path.write_text(json.dumps(payload, indent=2))
 
