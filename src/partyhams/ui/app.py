@@ -202,6 +202,8 @@ def run() -> int:
                 state.autoexport_minutes,
                 state.autoexport_only_if_new,
             )
+            window.on_change_wsjtx = _change_wsjtx
+            window.set_wsjtx(state.wsjtx_enabled, state.wsjtx_port)
             window.show()
             ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
             window.set_poller(ctx["poller"])
@@ -212,6 +214,7 @@ def run() -> int:
             if ctx["poller"] is not None:
                 await ctx["poller"].stop()
                 ctx["poller"] = None
+            await window.stop_wsjtx()
             await active.stop()
             window._on_close = None  # don't re-fire close_event during teardown
             if window._sections_window is not None:
@@ -306,6 +309,12 @@ def run() -> int:
         state.autoexport_enabled = enabled
         state.autoexport_minutes = minutes
         state.autoexport_only_if_new = only_if_new
+        save_state(state)
+
+    # --- WSJT-X UDP settings (live + persisted) ---
+    def _change_wsjtx(enabled: bool, port: int) -> None:
+        state.wsjtx_enabled = enabled
+        state.wsjtx_port = port
         save_state(state)
 
     # --- theme change (live) ---

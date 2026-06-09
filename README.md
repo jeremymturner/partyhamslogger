@@ -98,6 +98,13 @@ make spike CALL=K2XYZ
 Each instance logs a fake QSO every few seconds; watch the **QSO count** climb
 together and the **log hash** match — that's the peer-to-peer log converging.
 
+### WSJT-X (FT8/FT4) integration
+
+PartyHams can listen to WSJT-X over UDP: QSOs you log in WSJT-X land in your
+PartyHams log automatically, and in a data mode the F-key bar is replaced by a
+live WSJT-X panel (decodes, transmit state, Tx period). See
+[docs/WSJTX.md](docs/WSJTX.md) for the WSJT-X + rig setup.
+
 ## License
 
 [GPL-3.0-or-later](LICENSE). Free and open source, in keeping with the amateur
