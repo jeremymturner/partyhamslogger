@@ -66,6 +66,24 @@ def test_station_total_counts_whole_log():
     assert s.station_total("someone-else") == 0
 
 
+def test_station_stats_hour_and_mode_breakdown():
+    s = make_session()
+    sid = s.engine.station_id
+    exch = {"class": "1A", "section": "EPA"}
+    s.record_qso(call="K1A", freq_hz=14_040_000, mode=Mode.CW, exchange=exch)
+    s.record_qso(call="K2B", freq_hz=14_040_000, mode=Mode.CW, exchange=exch)
+    s.record_qso(call="K3C", freq_hz=14_200_000, mode=Mode.USB, exchange=exch)
+    stats = s.station_stats(sid)
+    assert stats["total"] == 3
+    assert stats["by_mode"] == {"CW": 2, "USB": 1}
+    assert sum(stats["by_hour"]) == 3
+    assert len(stats["by_hour"]) == 24
+    assert stats["first"] is not None and stats["last"] is not None
+    # An unknown station has an empty, well-formed result.
+    empty = s.station_stats("nobody")
+    assert empty["total"] == 0 and empty["first"] is None and sum(empty["by_hour"]) == 0
+
+
 def test_remote_status_appears_in_roster():
     bus = LoopbackBus()
     local = make_session()  # uses NullTransport; swap in a loopback transport

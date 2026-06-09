@@ -112,6 +112,23 @@ class LogSession:
         """Total QSOs logged by a station across the entire log (no time window)."""
         return sum(1 for qso in self.engine.log.qsos() if qso.station_id == station_id)
 
+    def station_stats(self, station_id: str) -> dict:
+        """Per-station breakdown for the expanded view: hourly + by-mode counts."""
+        qsos = [q for q in self.engine.log.qsos() if q.station_id == station_id]
+        by_hour = [0] * 24
+        by_mode: dict[str, int] = {}
+        for qso in qsos:
+            by_hour[qso.timestamp.hour] += 1
+            by_mode[qso.mode.value] = by_mode.get(qso.mode.value, 0) + 1
+        times = [q.timestamp for q in qsos]
+        return {
+            "total": len(qsos),
+            "by_hour": by_hour,  # index = UTC hour 0..23
+            "by_mode": by_mode,
+            "first": min(times) if times else None,
+            "last": max(times) if times else None,
+        }
+
     def roster(self) -> list[dict]:
         """All known stations (self first), with operating state and QSO rates."""
         now = utcnow()

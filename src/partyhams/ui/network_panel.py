@@ -2,7 +2,9 @@
 
 Top: every station we've detected — operator, frequency, mode, QSO counts in the
 last 15 / 60 minutes, and their all-time total in this log (our own row first).
-Bottom: a chat where a message goes to everyone by default, or to one operator.
+Click a station to drill into a per-station stats view (hour-by-hour histogram
+and a by-mode breakdown, with a Back button). Bottom: a chat where a message
+goes to everyone by default, or to one operator.
 
 Data comes from the :class:`~partyhams.app.session.LogSession`; sending a chat
 calls :attr:`on_send_chat` (wired by the main window to post + broadcast).
@@ -13,8 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -38,6 +41,59 @@ _COLUMNS = ["Op", "Freq", "Mode", "15m", "60m", "All"]
 
 def _fmt_freq(freq_hz: int) -> str:
     return f"{freq_hz / 1_000_000:.3f}" if freq_hz else "—"
+
+
+class _BarChart(QWidget):
+    """A tiny self-painted vertical bar chart (no extra chart dependency)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._labels: list[str] = []
+        self._values: list[int] = []
+        self.setMinimumHeight(110)
+
+    def set_data(self, labels: list[str], values: list[int]) -> None:
+        self._labels = labels
+        self._values = values
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        w, h = self.width(), self.height()
+        pad_top, pad_bottom = 14, 16
+        if not self._values or max(self._values) == 0:
+            painter.setPen(QColor(style.TEXT_DIM))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No QSOs yet")
+            painter.end()
+            return
+        n = len(self._values)
+        maxv = max(self._values)
+        gap = 2
+        bar_w = max(1.0, (w - (n + 1) * gap) / n)
+        accent, dim = QColor(style.ACCENT), QColor(style.TEXT_DIM)
+        font = painter.font()
+        font.setPointSize(7)
+        painter.setFont(font)
+        plot_h = h - pad_top - pad_bottom
+        for i, (label, val) in enumerate(zip(self._labels, self._values, strict=False)):
+            x = gap + i * (bar_w + gap)
+            bar_h = plot_h * (val / maxv)
+            y = h - pad_bottom - bar_h
+            painter.fillRect(QRect(int(x), int(y), int(bar_w), int(bar_h)), accent)
+            painter.setPen(dim)
+            if val:
+                painter.drawText(
+                    QRect(int(x) - 3, int(y) - pad_top, int(bar_w) + 6, pad_top),
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                    str(val),
+                )
+            if label:
+                painter.drawText(
+                    QRect(int(x) - 3, h - pad_bottom, int(bar_w) + 6, pad_bottom),
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                    label,
+                )
+        painter.end()
 
 
 def _short_time(iso_ts: str) -> str:
@@ -90,7 +146,17 @@ class NetworkPanel(QWidget):
         )
         for col, width in enumerate((72, 62, 44, 38, 38, 38)):
             self._table.setColumnWidth(col, width)
-        sv.addWidget(self._table)
+        # Click a row to drill into that station's stats.
+        self._table.cellClicked.connect(self._on_row_clicked)
+        self._table.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # Stack: page 0 = roster table, page 1 = the per-station stats view.
+        self._stack = QStackedWidget()
+        self._stack.addWidget(self._table)
+        self._stack.addWidget(self._build_stats_view())
+        sv.addWidget(self._stack)
+        self._roster_rows: list[dict] = []
+        self._stats_station_id: str | None = None
         splitter.addWidget(stations)
 
         # --- chat ---
@@ -132,13 +198,72 @@ class NetworkPanel(QWidget):
         """Re-apply palette colors after a live theme change."""
         for label in (self._station_label, self._chat_label):
             label.setStyleSheet(f"color: {style.TEXT_DIM}; font-weight: 600; padding: 2px;")
+        self._hour_chart.update()
+        self._mode_chart.update()
         self.refresh_roster()  # re-colors the self/stale row foregrounds
+
+    # ------------------------------------------------------------------ #
+    # per-station stats (drill-down)
+    # ------------------------------------------------------------------ #
+    def _build_stats_view(self) -> QWidget:
+        view = QWidget()
+        v = QVBoxLayout(view)
+        v.setContentsMargins(0, 0, 0, 0)
+        back = QPushButton("← Back to stations")
+        back.clicked.connect(self._show_roster)
+        v.addWidget(back)
+        self._stats_title = QLabel()
+        self._stats_title.setStyleSheet(f"color: {style.ACCENT}; font-weight: 700;")
+        v.addWidget(self._stats_title)
+        self._stats_summary = QLabel()
+        self._stats_summary.setWordWrap(True)
+        v.addWidget(self._stats_summary)
+        v.addWidget(self._section_label("QSOs per hour (UTC)"))
+        self._hour_chart = _BarChart()
+        v.addWidget(self._hour_chart)
+        v.addWidget(self._section_label("QSOs by mode"))
+        self._mode_chart = _BarChart()
+        v.addWidget(self._mode_chart)
+        v.addStretch(1)
+        return view
+
+    def _on_row_clicked(self, row: int, _col: int) -> None:
+        if 0 <= row < len(self._roster_rows):
+            self._stats_station_id = self._roster_rows[row]["station_id"]
+            self._render_stats()
+            self._stack.setCurrentIndex(1)
+
+    def _show_roster(self) -> None:
+        self._stats_station_id = None
+        self._stack.setCurrentIndex(0)
+
+    def _render_stats(self) -> None:
+        sid = self._stats_station_id
+        if sid is None:
+            return
+        row = next((r for r in self._roster_rows if r["station_id"] == sid), None)
+        who = (row["operator"] or row["call"] or "Station") if row else "Station"
+        stats = self.session.station_stats(sid)
+        self._stats_title.setText(who)
+        if stats["total"] and stats["first"] and stats["last"]:
+            span = f"{stats['first'].strftime('%H:%M')}–{stats['last'].strftime('%H:%M')} UTC"
+            self._stats_summary.setText(f"{stats['total']} QSOs  ·  {span}")
+        else:
+            self._stats_summary.setText("No QSOs logged yet")
+        # Hour histogram: label every third hour to avoid clutter.
+        hour_labels = [str(h) if h % 3 == 0 else "" for h in range(24)]
+        self._hour_chart.set_data(hour_labels, stats["by_hour"])
+        modes = sorted(stats["by_mode"].items(), key=lambda kv: kv[1], reverse=True)
+        self._mode_chart.set_data([m for m, _ in modes], [c for _, c in modes])
 
     # ------------------------------------------------------------------ #
     # roster
     # ------------------------------------------------------------------ #
     def refresh_roster(self) -> None:
         rows = self.session.roster()
+        self._roster_rows = rows
+        if self._stats_station_id is not None:
+            self._render_stats()  # keep the open drill-down live
         self._table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             rates = r["rates"]
