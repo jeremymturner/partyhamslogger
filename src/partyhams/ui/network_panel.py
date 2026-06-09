@@ -18,6 +18,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QSplitter,
@@ -52,7 +53,7 @@ class NetworkPanel(QWidget):
         #: Wired by the main window: on_send_chat(to_op, text).
         self.on_send_chat: Callable[[str, str], None] | None = None
         self._known_ops: list[str] = []
-        self.setMinimumWidth(292)
+        self.setMinimumWidth(200)  # generous lower bound; drag the dock edge to resize
 
         splitter = QSplitter(Qt.Orientation.Vertical)
 
@@ -67,9 +68,13 @@ class NetworkPanel(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self._table.setShowGrid(False)
-        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._table.horizontalHeader().setStretchLastSection(False)
-        # Tight padding so all 7 columns fit (and text isn't truncated) in the panel.
+        # Columns are user-resizable: drag a column border to widen/narrow it, and
+        # drag the dock's edge for more room (the last column takes up the slack).
+        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        header = self._table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        header.setMinimumSectionSize(24)
         self._table.setStyleSheet(
             "QHeaderView::section { padding: 4px 2px; }QTableWidget::item { padding: 2px 4px; }"
         )
