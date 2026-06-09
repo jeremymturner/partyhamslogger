@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Durable chat: synced across machines the same way QSOs are (dedup by uuid).
+CREATE TABLE IF NOT EXISTS chat (
+    uuid        TEXT PRIMARY KEY,
+    from_op     TEXT NOT NULL,
+    to_op       TEXT NOT NULL DEFAULT '',
+    text        TEXT NOT NULL,
+    ts          TEXT NOT NULL,
+    station_id  TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_chat_ts ON chat(ts);
 """
 
 
@@ -102,6 +113,31 @@ class SqliteLog:
         )
         self._conn.commit()
         return True
+
+    # --- chat (durable, synced) ---
+    def add_chat(self, entry: dict) -> bool:
+        """Persist a chat message. Idempotent on uuid; returns True if new."""
+        cur = self._conn.execute(
+            "INSERT OR IGNORE INTO chat (uuid, from_op, to_op, text, ts, station_id) "
+            "VALUES (:uuid, :from_op, :to_op, :text, :ts, :station_id)",
+            {
+                "uuid": entry["uuid"],
+                "from_op": entry.get("from_op", ""),
+                "to_op": entry.get("to_op", ""),
+                "text": entry.get("text", ""),
+                "ts": entry.get("ts", ""),
+                "station_id": entry.get("station_id", ""),
+            },
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
+
+    def all_chat(self) -> list[dict]:
+        """All chat messages ordered by send time (then uuid for stability)."""
+        rows = self._conn.execute(
+            "SELECT uuid, from_op, to_op, text, ts, station_id FROM chat ORDER BY ts, uuid"
+        )
+        return [dict(r) for r in rows]
 
     def all(self, include_deleted: bool = False) -> list[QSO]:
         sql = "SELECT * FROM qso"

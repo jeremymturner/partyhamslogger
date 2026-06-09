@@ -134,13 +134,27 @@ class StationStatus:
 
 @dataclass
 class Chat:
-    """A chat message. ``to_op`` empty or ``"*"`` means everyone."""
+    """A chat message. ``to_op`` empty or ``"*"`` means everyone.
+
+    ``uuid`` + ``station_id`` give each message a stable identity so it can be
+    persisted, deduped, and synced across machines just like a QSO.
+    """
 
     from_op: str
     to_op: str
     text: str
     ts: str  # ISO-8601 UTC
+    uuid: str = ""
+    station_id: str = ""
     type: str = "chat"
+
+
+@dataclass
+class ChatSyncResponse:
+    """A batch of chat messages answering a :class:`FullLogRequest`."""
+
+    chats: list[Chat] = field(default_factory=list)
+    type: str = "chat_sync_response"
 
 
 Message = (
@@ -152,6 +166,7 @@ Message = (
     | Heartbeat
     | StationStatus
     | Chat
+    | ChatSyncResponse
 )
 
 
@@ -210,14 +225,35 @@ def _body_to_dict(msg: Message) -> dict:
             "mode": msg.mode,
         }
     if isinstance(msg, Chat):
+        return {"type": "chat", **_chat_to_wire(msg)}
+    if isinstance(msg, ChatSyncResponse):
         return {
-            "type": "chat",
-            "from_op": msg.from_op,
-            "to_op": msg.to_op,
-            "text": msg.text,
-            "ts": msg.ts,
+            "type": "chat_sync_response",
+            "chats": [_chat_to_wire(c) for c in msg.chats],
         }
     raise TypeError(f"cannot encode message of type {type(msg).__name__}")
+
+
+def _chat_to_wire(msg: Chat) -> dict:
+    return {
+        "from_op": msg.from_op,
+        "to_op": msg.to_op,
+        "text": msg.text,
+        "ts": msg.ts,
+        "uuid": msg.uuid,
+        "station_id": msg.station_id,
+    }
+
+
+def _chat_from_wire(d: dict) -> Chat:
+    return Chat(
+        from_op=d["from_op"],
+        to_op=d["to_op"],
+        text=d["text"],
+        ts=d["ts"],
+        uuid=d.get("uuid", ""),
+        station_id=d.get("station_id", ""),
+    )
 
 
 def _body_from_dict(obj: dict) -> Message:
@@ -243,5 +279,7 @@ def _body_from_dict(obj: dict) -> Message:
             operator=obj["operator"], call=obj["call"], freq_hz=obj["freq_hz"], mode=obj["mode"]
         )
     if t == "chat":
-        return Chat(from_op=obj["from_op"], to_op=obj["to_op"], text=obj["text"], ts=obj["ts"])
+        return _chat_from_wire(obj)
+    if t == "chat_sync_response":
+        return ChatSyncResponse(chats=[_chat_from_wire(c) for c in obj.get("chats", [])])
     raise ValueError(f"unknown message type: {t!r}")

@@ -17,11 +17,12 @@ from pathlib import Path
 
 from partyhams.contest import get as get_contest
 from partyhams.contest.base import ContestConfig, ContestDefinition, ScoreSummary
-from partyhams.core.clock import new_station_id
+from partyhams.core.clock import new_station_id, new_uuid
 from partyhams.core.models import QSO, Mode, ModeGroup, mode_group_for, utcnow
 from partyhams.db.store import SqliteLog
 from partyhams.export import write_adif, write_cabrillo
 from partyhams.net.engine import SyncEngine
+from partyhams.net.protocol import Chat
 from partyhams.net.transport import MulticastTransport, NullTransport
 
 RATE_WINDOWS_MIN = (15, 30, 60)  # QSO-rate windows shown in the network panel
@@ -49,6 +50,8 @@ class LogSession:
         self._roster_listeners: list[Callable[[], None]] = []
         self._chat_listeners: list[Callable[[dict], None]] = []
         self._chat_log: list[dict] = []
+        self._chat_seen: set[str] = set()  # uuids already in _chat_log (dedup)
+        self._pending_broadcast: dict[str, Chat] = {}  # posted, awaiting broadcast
         self._dupe_keys: set[tuple] = set()
         self._mult_keys: set[tuple[str, str]] = set()
 
@@ -60,6 +63,22 @@ class LogSession:
             engine.log.apply(qso)
             engine.clock.update(qso.lamport)
         self._rebuild_indexes()
+        # Replay persisted chat so chat_messages() returns history on open and
+        # the engine can serve it to (re)joiners requesting a full log.
+        for row in store.all_chat():
+            self._chat_seen.add(row["uuid"])
+            self._chat_log.append({**row, "incoming": True})
+            engine.apply_chat(
+                Chat(
+                    from_op=row["from_op"],
+                    to_op=row["to_op"],
+                    text=row["text"],
+                    ts=row["ts"],
+                    uuid=row["uuid"],
+                    station_id=row["station_id"],
+                )
+            )
+        self._chat_log.sort(key=lambda e: (e["ts"], e["uuid"]))
 
     # ------------------------------------------------------------------ #
     # listeners / lifecycle
@@ -176,34 +195,65 @@ class LogSession:
         return sorted(seen)
 
     def post_chat(self, to_op: str, text: str) -> dict:
-        """Record a chat message locally and notify listeners (also broadcast it)."""
-        entry = {
-            "from_op": self.engine.operator,
-            "to_op": to_op,
-            "text": text,
-            "ts": utcnow().isoformat(),
-            "incoming": False,
-        }
-        self._chat_log.append(entry)
-        self._emit_chat(entry)
-        return entry
+        """Record a chat message locally, persist it, and notify listeners.
+
+        The message gets a stable uuid + our station_id (via the engine) so it
+        dedups and syncs across machines. Pair with :meth:`broadcast_chat`.
+        """
+        msg = Chat(
+            from_op=self.engine.operator,
+            to_op=to_op,
+            text=text,
+            ts=utcnow().isoformat(),
+            uuid=new_uuid(),
+            station_id=self.engine.station_id,
+        )
+        self.engine.apply_chat(msg)
+        self._pending_broadcast[msg.uuid] = msg
+        self._record_chat(msg, incoming=False)
+        return self._chat_log[-1]
 
     async def broadcast_chat(self, to_op: str, text: str) -> None:
-        await self.engine.send_chat(to_op, text)
+        """Broadcast the message most recently produced by :meth:`post_chat`."""
+        msg = next(
+            (
+                m
+                for m in self._pending_broadcast.values()
+                if m.to_op == to_op and m.text == text
+            ),
+            None,
+        )
+        if msg is None:
+            msg = await self.engine.send_chat(to_op, text)
+        else:
+            self._pending_broadcast.pop(msg.uuid, None)
+            await self.engine.transport.send(msg)
 
     def _on_chat(self, message, sender: str) -> None:
         # Show broadcasts and messages addressed to us; ignore others' DMs.
         addressed_to_all = message.to_op in ("", "*")
         if not (addressed_to_all or message.to_op == self.engine.operator):
             return
+        self._record_chat(message, incoming=True)
+
+    def _record_chat(self, message, incoming: bool) -> None:
+        """Append to the in-memory log, persist, and notify (dedup by uuid)."""
+        uuid = getattr(message, "uuid", "") or new_uuid()
+        if uuid in self._chat_seen:
+            return
+        self._chat_seen.add(uuid)
         entry = {
+            "uuid": uuid,
             "from_op": message.from_op,
             "to_op": message.to_op,
             "text": message.text,
             "ts": message.ts,
-            "incoming": True,
+            "station_id": getattr(message, "station_id", ""),
+            "incoming": incoming,
         }
+        self.store.add_chat(entry)
         self._chat_log.append(entry)
+        self._chat_log.sort(key=lambda e: (e["ts"], e["uuid"]))
         self._emit_chat(entry)
 
     def _emit_chat(self, entry: dict) -> None:
