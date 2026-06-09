@@ -43,8 +43,10 @@ and the radio choice are remembered (under `~/.partyhams/`), so the next launch
 reopens your log straight into the keyboard-first entry window: type the call,
 Enter walks the exchange fields, Enter logs. Live score and dupe checking update
 as you go; **Export ADIF / Cabrillo** when you're done. The log is also
-auto-saved to a timestamped ADIF backup every 5 minutes (in an `adif-backups/`
-folder next to the log file) so a crash never costs you more than a few QSOs.
+auto-saved to a timestamped ADIF backup on a timer (in an `adif-backups/`
+folder next to the log file) so a crash never costs you more than a few QSOs;
+configure it under **Logs → Auto-export…** (enable/disable, a 5–60 minute
+interval, and an option to skip exports when no new QSOs have been logged).
 Pick a look under **View → Theme** — three dark and three light schemes, defaulting
 to match your OS appearance.
 
