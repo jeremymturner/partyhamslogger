@@ -52,6 +52,7 @@ from partyhams.ui import shortcuts as sc
 from partyhams.ui import style
 from partyhams.ui.about_dialog import AboutDialog
 from partyhams.ui.cluster_window import ClusterWindow
+from partyhams.ui.help_window import HelpWindow
 from partyhams.ui.macros_dialog import MacrosDialog
 from partyhams.ui.network_panel import NetworkPanel
 from partyhams.ui.sections_window import SectionsWindow
@@ -69,6 +70,12 @@ from partyhams.wsjtx.protocol import Decode, QSOLogged, Status
 
 # Modes offered in the entry row.
 _ENTRY_MODES = [Mode.CW, Mode.USB, Mode.LSB, Mode.FM, Mode.RTTY, Mode.FT8]
+
+# Default hint shown on the empty call field (replaced by live match/QSL hints).
+_CALL_TOOLTIP = (
+    "Type the worked station's callsign, then press Enter to advance. "
+    "Hints (dupe, super-check-partial, QRZ) appear here as you type."
+)
 
 
 def _format_tx_status(word: str, key: int, label: str, text: str) -> str:
@@ -181,6 +188,7 @@ class MainWindow(QMainWindow):
         self._log_dialog = None  # app keeps the open new/open-log dialog alive here
         self._shortcuts_dialog = None  # the Keyboard Shortcuts dialog while open
         self._about_dialog = None  # the About dialog while open
+        self._help_window = None  # the User Guide window while open
         self._autoexport_dialog = None  # the Auto-export settings dialog while open
         # WSJT-X UDP integration (digital modes). The listener is created on
         # demand by set_wsjtx; _wsjtx_active flips the F-key bar -> info panel.
@@ -733,6 +741,9 @@ class MainWindow(QMainWindow):
         radio_menu = self.menuBar().addMenu("Radio")
         select_radio = radio_menu.addAction("Select Radio…", self._radio_menu_clicked)
         select_radio.setShortcut(QKeySequence(sc.SELECT_RADIO))
+        select_radio.setStatusTip(
+            "Choose how to read the rig (Hamlib, FlexRadio, Icom CI-V/LAN) or stay manual"
+        )
 
         self._build_wsjtx_menu()
 
@@ -749,9 +760,12 @@ class MainWindow(QMainWindow):
         self._view_menu = self.menuBar().addMenu("View")
         sections = self._view_menu.addAction("Sections Worked…", self._open_sections)
         sections.setShortcut(QKeySequence(sc.SECTIONS))
-        self._view_menu.addAction("DX Cluster…", self._open_cluster)
+        sections.setStatusTip("Live multiplier grid and schematic section map")
+        cluster = self._view_menu.addAction("DX Cluster…", self._open_cluster)
+        cluster.setStatusTip("Connect to a DX cluster and QSY the rig to spots")
         self._build_theme_menu(self._view_menu)
-        self._view_menu.addAction("Font…", self._choose_font)
+        font = self._view_menu.addAction("Font…", self._choose_font)
+        font.setStatusTip("Set the app-wide base font family and size")
 
         tools_menu = self.menuBar().addMenu("Tools")
         tools_menu.addAction("QRZ Login…", self._edit_qrz)
@@ -765,10 +779,14 @@ class MainWindow(QMainWindow):
         ref_menu.addAction("Import QRZ users…", self._import_qrz)
 
         help_menu = self.menuBar().addMenu("Help")
+        guide = help_menu.addAction("User Guide…", self._show_help)
+        guide.setStatusTip("Open the illustrated user guide for every screen")
         shortcuts = help_menu.addAction("Keyboard Shortcuts…", self._show_shortcuts)
         shortcuts.setShortcut(QKeySequence(sc.SHORTCUTS))
+        shortcuts.setStatusTip("Show the full keyboard-shortcut reference")
         help_menu.addSeparator()
-        help_menu.addAction("About PartyHams Logger…", self._show_about)
+        about = help_menu.addAction("About PartyHams Logger…", self._show_about)
+        about.setStatusTip("Version, credits, and the project link")
 
     def _build_autocq_menu(self, macros_menu) -> None:
         macros_menu.addSeparator()
@@ -982,6 +1000,7 @@ class MainWindow(QMainWindow):
                 last_dark = dark
             action = theme_menu.addAction(name)
             action.setCheckable(True)
+            action.setStatusTip(f"Apply the {name} color theme (applies instantly)")
             action.setChecked(name == style.active_name())
             group.addAction(action)
             action.triggered.connect(lambda _checked=False, n=name: self._change_theme(n))
@@ -1046,6 +1065,13 @@ class MainWindow(QMainWindow):
         self._about_dialog = dialog  # keep alive while open
         dialog.finished.connect(lambda _result: setattr(self, "_about_dialog", None))
         dialog.open()
+
+    def _show_help(self) -> None:
+        if self._help_window is None:
+            self._help_window = HelpWindow()  # keep the ref alive like the others
+        self._help_window.show()
+        self._help_window.raise_()
+        self._help_window.activateWindow()
 
     def _open_sections(self) -> None:
         if self._sections_window is None:
@@ -1169,6 +1195,7 @@ class MainWindow(QMainWindow):
 
         self._call = QLineEdit()
         self._call.setPlaceholderText("Call")
+        self._call.setToolTip(_CALL_TOOLTIP)
         self._call.setMinimumWidth(110)
         self._call.setMaximumWidth(160)
         make_upper(self._call)
@@ -1371,7 +1398,7 @@ class MainWindow(QMainWindow):
         suggestions also draw from the operator's already-worked calls.
         """
         if not call:
-            self._call.setToolTip("")
+            self._call.setToolTip(_CALL_TOOLTIP)
             return
         lines: list[str] = []
         worked = self.session.partial_matches(call)
