@@ -13,13 +13,18 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
+    QLabel,
     QLineEdit,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from partyhams.contest import available
 from partyhams.contest import get as get_contest
+from partyhams.contest.pota import is_valid_park
+from partyhams.contest.pota_api import verify_park
 from partyhams.ui.widgets import make_upper
 
 
@@ -64,6 +69,7 @@ class LogDialog(QDialog):
 
         self._exchange_edits: dict[str, QLineEdit] = {}
         self._config_widgets: dict[str, QWidget] = {}
+        self._park_status: QLabel | None = None
         self._contest.currentIndexChanged.connect(lambda _i: self._rebuild_contest_fields())
         self._rebuild_contest_fields()
 
@@ -72,6 +78,7 @@ class LogDialog(QDialog):
             self._dyn.removeRow(0)
         self._exchange_edits = {}
         self._config_widgets = {}
+        self._park_status = None
 
         contest = get_contest(self._contest.currentData())
         for fld in contest.exchange_fields():
@@ -89,10 +96,48 @@ class LogDialog(QDialog):
                     combo.setCurrentIndex(idx)
                 self._config_widgets[cfg.name] = combo
                 self._dyn.addRow(cfg.label, combo)
+            elif contest.id == "pota" and cfg.name == "park":
+                self._add_park_field(cfg)
             else:
                 edit = QLineEdit(cfg.default)
                 self._config_widgets[cfg.name] = edit
                 self._dyn.addRow(cfg.label, edit)
+
+    def _add_park_field(self, cfg) -> None:
+        """A park-reference text field with an inline 'Verify park' button."""
+        edit = QLineEdit(cfg.default)
+        make_upper(edit)
+        self._config_widgets[cfg.name] = edit
+        verify = QPushButton("Verify park")
+        verify.clicked.connect(self._verify_park)
+        row = QWidget()
+        hbox = QHBoxLayout(row)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.addWidget(edit, 1)
+        hbox.addWidget(verify)
+        self._dyn.addRow(cfg.label, row)
+        self._park_status = QLabel("")
+        self._park_status.setWordWrap(True)
+        self._dyn.addRow("", self._park_status)
+
+    def _verify_park(self) -> None:
+        """Resolve the park ref via the POTA API; soft-warn (never block) on failure."""
+        if self._park_status is None:
+            return
+        widget = self._config_widgets.get("park")
+        ref = widget.text().strip().upper() if isinstance(widget, QLineEdit) else ""
+        if not is_valid_park(ref):
+            self._park_status.setText("Enter a park like US-1234 to verify.")
+            return
+        self._park_status.setText("Verifying…")
+        info = verify_park(ref)
+        if info:
+            loc = f" — {info['location']}" if info.get("location") else ""
+            self._park_status.setText(f"{info['reference']}: {info['name']}{loc}")
+        else:
+            self._park_status.setText(
+                f"Could not verify {ref} (offline or unknown). You can still log."
+            )
 
     def _on_accept(self) -> None:
         if not self._call.text().strip():
