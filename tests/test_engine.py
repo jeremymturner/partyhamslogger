@@ -85,6 +85,48 @@ async def test_three_stations_converge():
     assert len(a.log) == 9
 
 
+async def test_request_full_log_pulls_entire_log():
+    # A station that asks for a full log gets everything — even though it never
+    # announced a Hello, so the only path is FullLogRequest -> SyncResponse(all).
+    bus = LoopbackBus()
+    a = await make_engine(bus, "W1AAA")
+    await log_some(a, 3, "AAA")
+
+    b_t = LoopbackTransport(bus, NETWORK, station_id=new_station_id())
+    b = SyncEngine(b_t, operator="K2BBB", call="K2BBB")
+    await b_t.start()  # NB: no join()/Hello — isolate the full-log request path
+    await b.request_full_log()
+    await converge(a, b)
+
+    assert {q.call for q in b.log.qsos()} == {"AAA000", "AAA001", "AAA002"}
+
+
+async def test_full_log_request_includes_deleted_tombstones():
+    bus = LoopbackBus()
+    a = await make_engine(bus, "W1AAA")
+    q = await a.log_qso(call="DX1", freq_hz=_FREQ, mode=Mode.CW)
+    # Delete it (a tombstone the requester must also receive to converge).
+    deleted = replace_deleted(a, q)
+
+    b_t = LoopbackTransport(bus, NETWORK, station_id=new_station_id())
+    b = SyncEngine(b_t, operator="K2BBB", call="K2BBB")
+    await b_t.start()
+    await b.request_full_log()
+    await converge(a, b)
+
+    assert a.log.log_hash() == b.log.log_hash()
+    assert deleted.uuid in {q.uuid for q in b.log.qsos(include_deleted=True)}
+
+
+def replace_deleted(engine: SyncEngine, qso):
+    """Mark a QSO deleted via the engine's own record path (new lamport)."""
+    from dataclasses import replace
+
+    tombstone = replace(qso, deleted=True, lamport=engine.clock.tick())
+    engine.log.apply(tombstone)
+    return tombstone
+
+
 async def test_late_joiner_catches_up_via_hello():
     bus = LoopbackBus()
     a = await make_engine(bus, "W1AAA")

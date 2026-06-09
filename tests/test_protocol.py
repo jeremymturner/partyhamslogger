@@ -48,6 +48,10 @@ def test_sync_request_response_roundtrip():
     assert [q.call for q in resp.qsos] == ["K1A", "K2B"]
 
 
+def test_full_log_request_roundtrip():
+    assert isinstance(roundtrip(p.FullLogRequest()), p.FullLogRequest)
+
+
 def test_heartbeat_roundtrip():
     decoded = roundtrip(p.Heartbeat(count=42, log_hash="deadbeef", lamport_max=99))
     assert isinstance(decoded, p.Heartbeat)

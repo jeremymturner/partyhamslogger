@@ -10,6 +10,7 @@ from partyhams.net.engine import SyncEngine
 from partyhams.net.protocol import (
     PROTOCOL_VERSION,
     Chat,
+    FullLogRequest,
     Heartbeat,
     Hello,
     QsoMessage,
@@ -32,6 +33,7 @@ from partyhams.net.transport import (
 __all__ = [
     "PROTOCOL_VERSION",
     "Chat",
+    "FullLogRequest",
     "Heartbeat",
     "Hello",
     "QsoMessage",

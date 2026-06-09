@@ -100,6 +100,18 @@ class SyncResponse:
 
 
 @dataclass
+class FullLogRequest:
+    """Ask every peer to send its *entire* log (anti-entropy from scratch).
+
+    Unlike :class:`SyncRequest`, which only fetches records past a high-water
+    mark, this asks for a complete copy — used by the "request all logs" button
+    and on (re)join so a station ends up with everyone's QSOs.
+    """
+
+    type: str = "full_log_request"
+
+
+@dataclass
 class Heartbeat:
     """Periodic liveness + divergence detector (``log_hash`` compares logs)."""
 
@@ -131,7 +143,16 @@ class Chat:
     type: str = "chat"
 
 
-Message = Hello | QsoMessage | SyncRequest | SyncResponse | Heartbeat | StationStatus | Chat
+Message = (
+    Hello
+    | QsoMessage
+    | SyncRequest
+    | SyncResponse
+    | FullLogRequest
+    | Heartbeat
+    | StationStatus
+    | Chat
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -171,6 +192,8 @@ def _body_to_dict(msg: Message) -> dict:
         return {"type": "sync_request", "high_water": msg.high_water}
     if isinstance(msg, SyncResponse):
         return {"type": "sync_response", "qsos": [qso_to_wire(q) for q in msg.qsos]}
+    if isinstance(msg, FullLogRequest):
+        return {"type": "full_log_request"}
     if isinstance(msg, Heartbeat):
         return {
             "type": "heartbeat",
@@ -209,6 +232,8 @@ def _body_from_dict(obj: dict) -> Message:
         return SyncRequest(high_water=dict(obj.get("high_water", {})))
     if t == "sync_response":
         return SyncResponse(qsos=[qso_from_wire(q) for q in obj.get("qsos", [])])
+    if t == "full_log_request":
+        return FullLogRequest()
     if t == "heartbeat":
         return Heartbeat(
             count=obj["count"], log_hash=obj["log_hash"], lamport_max=obj["lamport_max"]

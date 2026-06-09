@@ -239,6 +239,10 @@ class LogSession:
     async def broadcast(self, qso: QSO) -> None:
         await self.engine.broadcast(qso)
 
+    async def request_full_log(self) -> None:
+        """Ask every networked station to send its entire log."""
+        await self.engine.request_full_log()
+
     async def log_qso(self, **kwargs) -> QSO:
         """Record + broadcast (convenience for tests/headless callers)."""
         qso = self.record_qso(**kwargs)

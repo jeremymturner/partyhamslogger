@@ -172,6 +172,7 @@ class MainWindow(QMainWindow):
         """Dockable side panel: station roster + chat (toggle via the View menu)."""
         self._panel = NetworkPanel(self.session)
         self._panel.on_send_chat = self._send_chat
+        self._panel.on_request_sync = self._request_full_log
         dock = QDockWidget("Network", self)
         dock.setObjectName("networkDock")
         dock.setWidget(self._panel)
@@ -195,6 +196,13 @@ class MainWindow(QMainWindow):
         self.session.post_chat(to_op, text)  # local echo via the chat listener
         if self._loop is not None and self._loop.is_running():
             self._loop.create_task(self.session.broadcast_chat(to_op, text))
+
+    def _request_full_log(self) -> None:
+        if self._loop is not None and self._loop.is_running():
+            self._loop.create_task(self.session.request_full_log())
+            self.statusBar().showMessage("Requested full logs from all stations…", 4000)
+        else:
+            self.statusBar().showMessage("Not networked — no peers to sync with", 4000)
 
     # ------------------------------------------------------------------ #
     # F-key macros

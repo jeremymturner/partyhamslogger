@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QPushButton,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -52,6 +53,8 @@ class NetworkPanel(QWidget):
         self.session = session
         #: Wired by the main window: on_send_chat(to_op, text).
         self.on_send_chat: Callable[[str, str], None] | None = None
+        #: Wired by the main window: ask every peer for their full log.
+        self.on_request_sync: Callable[[], None] | None = None
         self._known_ops: list[str] = []
         self.setMinimumWidth(200)  # generous lower bound; drag the dock edge to resize
 
@@ -61,8 +64,14 @@ class NetworkPanel(QWidget):
         stations = QWidget()
         sv = QVBoxLayout(stations)
         sv.setContentsMargins(6, 6, 6, 2)
+        header = QHBoxLayout()
         self._station_label = self._section_label("Stations")
-        sv.addWidget(self._station_label)
+        header.addWidget(self._station_label, stretch=1)
+        self._sync_btn = QPushButton("Sync all logs")
+        self._sync_btn.setToolTip("Ask every station to send their full log so you have a copy")
+        self._sync_btn.clicked.connect(self._request_sync)
+        header.addWidget(self._sync_btn)
+        sv.addLayout(header)
         self._table = QTableWidget(0, len(_COLUMNS))
         self._table.setHorizontalHeaderLabels(_COLUMNS)
         self._table.verticalHeader().setVisible(False)
@@ -194,3 +203,7 @@ class NetworkPanel(QWidget):
             return
         self.on_send_chat(self._recipient.currentData(), text)
         self._input.clear()
+
+    def _request_sync(self) -> None:
+        if self.on_request_sync is not None:
+            self.on_request_sync()

@@ -23,6 +23,7 @@ from partyhams.core.clock import LamportClock, new_uuid
 from partyhams.core.models import QSO, Mode, utcnow
 from partyhams.net.protocol import (
     Chat,
+    FullLogRequest,
     Heartbeat,
     Hello,
     Message,
@@ -94,6 +95,9 @@ class SyncEngine:
             asyncio.create_task(self._heartbeat_loop()),
             asyncio.create_task(self._status_loop()),
         ]
+        # On (re)join, pull a complete copy of everyone's log so a station that
+        # quit and came back ends up with all QSOs locally.
+        await self.request_full_log()
 
     async def stop(self) -> None:
         self._running = False
@@ -149,6 +153,10 @@ class SyncEngine:
     async def broadcast(self, qso: QSO) -> None:
         """Send a previously-recorded QSO to peers."""
         await self.transport.send(QsoMessage(qso=qso))
+
+    async def request_full_log(self) -> None:
+        """Ask every peer to send its entire log (anti-entropy from scratch)."""
+        await self.transport.send(FullLogRequest())
 
     async def log_qso(self, **kwargs) -> QSO:
         """Record and broadcast a QSO (convenience for tests/headless callers)."""
@@ -257,6 +265,13 @@ class SyncEngine:
 
         elif isinstance(message, SyncRequest):
             await self._send_diff(message.high_water)
+
+        elif isinstance(message, FullLogRequest):
+            # Reply with our entire log (including tombstones) so the requester
+            # gets a guaranteed-complete copy, not just a high-water delta.
+            everything = self.log.qsos(include_deleted=True)
+            if everything:
+                await self.transport.send(SyncResponse(qsos=everything))
 
         elif isinstance(message, SyncResponse):
             for qso in message.qsos:
