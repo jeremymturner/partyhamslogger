@@ -106,6 +106,19 @@ package-deb: package ## Linux .deb (needs fpm)
 package-rpm: package ## Linux .rpm (needs fpm)
 	@bash packaging/build-linux-pkg.sh rpm
 
+# ---- Release (tag + build + checksums + gh upload; see docs/RELEASING.md) --
+# Thin wrapper around scripts/release.sh. The script does the work (and the
+# safety checks), so `make -n release` parses without building anything.
+#   make release VERSION=v0.1.0                  # cut a release for THIS OS
+#   make release VERSION=v0.1.0 RELEASE_ARGS=--dry-run
+#   make release VERSION=v0.1.0 RELEASE_ARGS="--target package-mac-universal"
+RELEASE_ARGS ?=
+
+.PHONY: release
+release: ## Cut a GitHub release (make release VERSION=v0.1.0 [RELEASE_ARGS=--dry-run])
+	@test -n "$(VERSION)" || { echo "set VERSION, e.g.: make release VERSION=v0.1.0"; exit 1; }
+	@bash scripts/release.sh $(VERSION) $(RELEASE_ARGS)
+
 .PHONY: clean
 clean: ## Remove caches and build artifacts (keeps the venv)
 	@find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
