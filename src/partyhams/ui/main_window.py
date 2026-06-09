@@ -48,6 +48,7 @@ from partyhams.radio.base import Capability, RadioState
 from partyhams.ui import shortcuts as sc
 from partyhams.ui import style
 from partyhams.ui.about_dialog import AboutDialog
+from partyhams.ui.cluster_window import ClusterWindow
 from partyhams.ui.macros_dialog import MacrosDialog
 from partyhams.ui.network_panel import NetworkPanel
 from partyhams.ui.sections_window import SectionsWindow
@@ -140,6 +141,7 @@ class MainWindow(QMainWindow):
         #: Set by the app: on_change_autoexport(enabled, minutes, only_if_new).
         self.on_change_autoexport: Callable[[bool, int, bool], None] | None = None
         self._sections_window: SectionsWindow | None = None
+        self._cluster_window: ClusterWindow | None = None
         #: Set by the app to no-arg callbacks that switch radio / log.
         self.on_change_radio: Callable[[], None] | None = None
         self.on_new_log: Callable[[], None] | None = None
@@ -618,6 +620,7 @@ class MainWindow(QMainWindow):
         self._view_menu = self.menuBar().addMenu("View")
         sections = self._view_menu.addAction("Sections Worked…", self._open_sections)
         sections.setShortcut(QKeySequence(sc.SECTIONS))
+        self._view_menu.addAction("DX Cluster…", self._open_cluster)
         self._build_theme_menu(self._view_menu)
         self._view_menu.addAction("Font…", self._choose_font)
 
@@ -732,6 +735,18 @@ class MainWindow(QMainWindow):
         self._sections_window.raise_()
         self._sections_window.activateWindow()
 
+    def _open_cluster(self) -> None:
+        if self._cluster_window is None:
+            self._cluster_window = ClusterWindow(
+                poller=self._poller,
+                login_call=self.session.config.my_call,
+                loop=self._loop,
+            )
+        self._cluster_window.set_poller(self._poller)
+        self._cluster_window.show()
+        self._cluster_window.raise_()
+        self._cluster_window.activateWindow()
+
     def _radio_menu_clicked(self) -> None:
         if self.on_change_radio is not None:
             self.on_change_radio()
@@ -750,6 +765,8 @@ class MainWindow(QMainWindow):
             poller.on_status = self._on_radio_status
             if poller.state is not None:
                 self._apply_radio_state(poller.state)
+        if self._cluster_window is not None:
+            self._cluster_window.set_poller(poller)
         self._refresh_indicators()
         self._update_radio_label()
 
