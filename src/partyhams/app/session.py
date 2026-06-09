@@ -120,9 +120,27 @@ class LogSession:
         """
         self.post_chat("*", f"⏰ {operator}'s clock is off by {offset:+.1f}s — check time sync")
 
-    def set_local_status(self, freq_hz: int, mode: Mode) -> None:
-        """Push our current frequency/mode so peers see what we're on."""
-        self.engine.update_status(freq_hz=freq_hz, mode=mode.value)
+    def set_local_status(
+        self,
+        freq_hz: int,
+        mode: Mode,
+        *,
+        power_w: float | None = None,
+        swr: float | None = None,
+        ft_tx_even: int | None = None,
+    ) -> None:
+        """Push our current frequency/mode so peers see what we're on.
+
+        ``power_w``/``swr``/``ft_tx_even`` are optional best-effort extras (from
+        the radio or WSJT-X); ``None`` leaves any previously-set value intact.
+        """
+        self.engine.update_status(
+            freq_hz=freq_hz,
+            mode=mode.value,
+            power_w=power_w,
+            swr=swr,
+            ft_tx_even=ft_tx_even,
+        )
 
     def station_rates(self, station_id: str, now=None) -> dict[int, int]:
         """Cumulative QSO counts for a station within each rate window."""
@@ -169,6 +187,9 @@ class LogSession:
                     "call": self.engine.call,
                     "freq_hz": int(self.engine._status["freq_hz"]),
                     "mode": str(self.engine._status["mode"]),
+                    "power_w": self.engine._status["power_w"],
+                    "swr": self.engine._status["swr"],
+                    "ft_tx_even": self.engine._status["ft_tx_even"],
                     "last_heard": now,
                 },
                 is_self=True,
@@ -195,6 +216,11 @@ class LogSession:
             # NB: offset includes network latency — see partyhams.net.clocksync.
             "clock_offset": None if is_self else info.get("clock_offset"),
             "clock_off": (not is_self) and bool(info.get("clock_off")),
+            # Last-known transmit power (W) and SWR; 0 => unknown. For FT8/FT4,
+            # ft_tx_even is -1 unknown / 0 odd / 1 even (the Tx sequence).
+            "power_w": float(info.get("power_w", 0.0) or 0.0),
+            "swr": float(info.get("swr", 0.0) or 0.0),
+            "ft_tx_even": int(info.get("ft_tx_even", -1)),
             "rates": self.station_rates(sid, now),
             "total": self.station_total(sid),
         }

@@ -129,12 +129,21 @@ class Heartbeat:
 
 @dataclass
 class StationStatus:
-    """Presence + current operating state of a station (for the network panel)."""
+    """Presence + current operating state of a station (for the network panel).
+
+    ``power_w`` / ``swr`` are the station's last-known transmit power (watts) and
+    SWR; ``0`` means "unknown" (default, for back-compat with older peers). For
+    FT8/FT4, ``ft_tx_even`` says which sequence the station transmits on:
+    ``-1`` unknown, ``0`` odd, ``1`` even.
+    """
 
     operator: str
     call: str
     freq_hz: int
     mode: str
+    power_w: float = 0.0  # 0 => unknown
+    swr: float = 0.0  # 0 => unknown
+    ft_tx_even: int = -1  # -1 unknown, 0 odd, 1 even
     type: str = "status"
 
 
@@ -230,6 +239,9 @@ def _body_to_dict(msg: Message) -> dict:
             "call": msg.call,
             "freq_hz": msg.freq_hz,
             "mode": msg.mode,
+            "power_w": msg.power_w,
+            "swr": msg.swr,
+            "ft_tx_even": msg.ft_tx_even,
         }
     if isinstance(msg, Chat):
         return {"type": "chat", **_chat_to_wire(msg)}
@@ -286,7 +298,13 @@ def _body_from_dict(obj: dict) -> Message:
         )
     if t == "status":
         return StationStatus(
-            operator=obj["operator"], call=obj["call"], freq_hz=obj["freq_hz"], mode=obj["mode"]
+            operator=obj["operator"],
+            call=obj["call"],
+            freq_hz=obj["freq_hz"],
+            mode=obj["mode"],
+            power_w=float(obj.get("power_w", 0.0)),
+            swr=float(obj.get("swr", 0.0)),
+            ft_tx_even=int(obj.get("ft_tx_even", -1)),
         )
     if t == "chat":
         return _chat_from_wire(obj)

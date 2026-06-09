@@ -58,7 +58,12 @@ from partyhams.ui.sections_window import SectionsWindow
 from partyhams.ui.shortcuts import ShortcutsDialog
 from partyhams.ui.widgets import make_upper
 from partyhams.ui.wsjtx_panel import WsjtxPanel
-from partyhams.wsjtx.convert import qso_logged_to_record
+from partyhams.wsjtx.convert import (
+    map_mode,
+    parse_tx_power,
+    qso_logged_to_record,
+    tx_even_from_epoch,
+)
 from partyhams.wsjtx.listener import WsjtxListener
 from partyhams.wsjtx.protocol import Decode, QSOLogged, Status
 
@@ -866,6 +871,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"WSJT-X log error: {exc}", 4000)
             return
         self._broadcast(qso)
+        # If WSJT-X reported the transmit power, share it so peers see our power.
+        power_w = parse_tx_power(msg.tx_power)
+        if power_w is not None:
+            self.session.set_local_status(qso.freq_hz, qso.mode, power_w=power_w)
         self.statusBar().showMessage(f"WSJT-X logged {kwargs['call']}", 3000)
 
     def _on_wsjtx_status(self, status: Status) -> None:
@@ -887,6 +896,15 @@ class MainWindow(QMainWindow):
             tx_period_odd=status.tx_period_odd,
             sending=sending if status.transmitting else "",
         )
+        # Broadcast which FT8/FT4 sequence we transmit on so peers see odd/even.
+        # Prefer WSJT-X's explicit tx_period_odd; otherwise derive from the clock.
+        if status.tx_period_odd is not None:
+            ft_tx_even = 0 if status.tx_period_odd else 1
+        else:
+            ft_tx_even = tx_even_from_epoch(utcnow().timestamp(), status.mode)
+        self.session.set_local_status(
+            status.dial_freq, self._map_status_mode(status.mode), ft_tx_even=ft_tx_even
+        )
 
     def _on_wsjtx_decode(self, decode: Decode) -> None:
         """Show a decode line and highlight calls whose section we still need."""
@@ -897,8 +915,6 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _map_status_mode(mode: str) -> Mode:
-        from partyhams.wsjtx.convert import map_mode
-
         return map_mode(mode)
 
     def _set_wsjtx_active(self, active: bool) -> None:

@@ -43,6 +43,26 @@ def _fmt_freq(freq_hz: int) -> str:
     return f"{freq_hz / 1_000_000:.3f}" if freq_hz else "—"
 
 
+def _radio_line(row: dict | None) -> str:
+    """One-line summary of a station's power / SWR / FT8-FT4 Tx sequence.
+
+    Power and SWR show ``—`` when unknown (0 = unknown on the wire). The Tx
+    sequence (ODD/EVEN) is only shown for FT8/FT4 and only when known.
+    """
+    if row is None:
+        return ""
+    power = row.get("power_w", 0.0) or 0.0
+    swr = row.get("swr", 0.0) or 0.0
+    power_text = f"{power:.0f} W" if power > 0 else "—"
+    swr_text = f"{swr:.1f}:1" if swr > 0 else "—"
+    parts = [f"Power: {power_text}", f"SWR: {swr_text}"]
+    if (row.get("mode") or "").strip().upper() in ("FT8", "FT4"):
+        even = int(row.get("ft_tx_even", -1))
+        tx_text = "EVEN" if even == 1 else "ODD" if even == 0 else "—"
+        parts.append(f"Tx: {tx_text}")
+    return "    ".join(parts)
+
+
 class _BarChart(QWidget):
     """A tiny self-painted vertical bar chart (no extra chart dependency)."""
 
@@ -218,6 +238,10 @@ class NetworkPanel(QWidget):
         self._stats_summary = QLabel()
         self._stats_summary.setWordWrap(True)
         v.addWidget(self._stats_summary)
+        # Power / SWR / (for FT8/FT4) Tx sequence — filled in by _render_stats.
+        self._stats_radio = QLabel()
+        self._stats_radio.setWordWrap(True)
+        v.addWidget(self._stats_radio)
         v.addWidget(self._section_label("QSOs per hour (UTC)"))
         self._hour_chart = _BarChart()
         v.addWidget(self._hour_chart)
@@ -250,6 +274,7 @@ class NetworkPanel(QWidget):
             self._stats_summary.setText(f"{stats['total']} QSOs  ·  {span}")
         else:
             self._stats_summary.setText("No QSOs logged yet")
+        self._stats_radio.setText(_radio_line(row))
         # Hour histogram: label every third hour to avoid clutter.
         hour_labels = [str(h) if h % 3 == 0 else "" for h in range(24)]
         self._hour_chart.set_data(hour_labels, stats["by_hour"])

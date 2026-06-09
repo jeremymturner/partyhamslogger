@@ -33,6 +33,52 @@ def map_mode(mode: str) -> Mode:
     return _MODE_MAP.get(mode.strip().upper(), Mode.FT8)
 
 
+# FT8 transmits in 15s sequences, FT4 in 7.5s sequences (UTC-aligned). The
+# sequence index is floor(seconds-into-minute / length); even index => "even".
+_SEQ_LEN_S: dict[str, float] = {"FT8": 15.0, "FT4": 7.5}
+
+
+def tx_even_from_epoch(epoch_seconds: float, mode: str) -> int:
+    """Which FT8/FT4 sequence a transmit at ``epoch_seconds`` falls in.
+
+    Returns ``1`` for an even sequence, ``0`` for odd, and ``-1`` when ``mode``
+    is not a timed FT8/FT4 data mode (so odd/even is undefined). The sequence is
+    aligned to UTC wall-clock seconds: FT8 uses 15s slots, FT4 uses 7.5s slots,
+    and the slot index is ``floor((seconds-into-minute) / slot_length)``.
+
+    Pure + UTC-only so it can be unit-tested without WSJT-X or Qt.
+    """
+    length = _SEQ_LEN_S.get(mode.strip().upper())
+    if length is None:
+        return -1
+    seconds_into_minute = epoch_seconds % 60.0
+    index = int(seconds_into_minute // length)
+    return 1 if index % 2 == 0 else 0
+
+
+def parse_tx_power(raw: str) -> float | None:
+    """Parse WSJT-X's free-form Tx-power string into watts (``None`` if absent).
+
+    WSJT-X carries power as a free-text field (e.g. ``"5"``, ``"100 W"``); we
+    take the leading numeric part. Returns ``None`` when empty/unparseable so the
+    caller can leave power unknown rather than broadcasting a bogus ``0``.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    num = ""
+    for ch in text:
+        if ch.isdigit() or ch in ".-":
+            num += ch
+        else:
+            break
+    try:
+        value = float(num)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def qso_logged_to_record(msg: QSOLogged) -> dict[str, object]:
     """Build ``record_qso`` kwargs from a WSJT-X logged QSO.
 
