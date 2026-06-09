@@ -12,6 +12,7 @@ from partyhams.radio import flex as _flex  # noqa: F401
 # Import backends so they register.
 from partyhams.radio import hamlib as _hamlib  # noqa: F401
 from partyhams.radio import icom_civ as _icom  # noqa: F401
+from partyhams.radio import icom_net as _icom_net  # noqa: F401
 from partyhams.radio.base import (
     Capability,
     Radio,

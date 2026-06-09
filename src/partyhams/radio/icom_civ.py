@@ -5,6 +5,10 @@ Talks the CI-V serial protocol (``radio/civ_protocol.py``) over a USB/serial por
 via pyserial. Serial I/O is blocking, so each transaction runs in a thread executor
 to keep the asyncio loop responsive; transactions are serialized with a lock.
 
+The CI-V command set itself lives in :class:`~partyhams.radio.civ_commands.CivRadio`
+and is shared with the network backend (``radio/icom_net.py``); this module only
+provides the serial transport.
+
 Native (vs. Hamlib) for fast polling, the spectrum scope, and dual-watch on the
 IC-7610.
 """
@@ -15,24 +19,14 @@ import asyncio
 import time
 from collections.abc import Callable
 
-from partyhams.core.models import Mode
-from partyhams.radio.base import Capability, Radio, RadioState, RadioUnsupported
+from partyhams.radio.base import RadioUnsupported
+from partyhams.radio.civ_commands import CivRadio
 from partyhams.radio.civ_protocol import (
     ACK_OK,
     CIV_ADDR_IC705,
     CIV_ADDR_IC7610,
-    CMD_PTT,
-    CMD_READ_FREQ,
-    CMD_READ_MODE,
-    CMD_SEND_CW,
-    CMD_SET_FREQ,
-    CMD_SET_MODE,
     CONTROLLER_ADDR,
-    bcd_to_freq,
     build_frame,
-    civ_to_mode,
-    freq_to_bcd,
-    mode_to_civ,
     parse_frames,
 )
 from partyhams.radio.registry import register
@@ -41,7 +35,7 @@ _MODEL_NAMES = {CIV_ADDR_IC705: "IC-705", CIV_ADDR_IC7610: "IC-7610"}
 
 
 @register
-class IcomCIV(Radio):
+class IcomCIV(CivRadio):
     backend_id = "icom-civ"
     backend_name = "Icom CI-V"
 
@@ -58,23 +52,6 @@ class IcomCIV(Radio):
         self._serial_factory = serial_factory  # injected in tests
         self._serial: object | None = None
         self._lock = asyncio.Lock()
-
-    @property
-    def capabilities(self) -> Capability:
-        caps = (
-            Capability.FREQUENCY
-            | Capability.MODE
-            | Capability.VFO_AB
-            | Capability.SPLIT
-            | Capability.PTT
-            | Capability.S_METER
-            | Capability.RIT_XIT
-            | Capability.SPECTRUM
-            | Capability.SEND_CW
-        )
-        if self.civ_address == CIV_ADDR_IC7610:
-            caps |= Capability.SUB_RECEIVER  # dual receive
-        return caps
 
     def description(self) -> str:
         model = _MODEL_NAMES.get(self.civ_address, "CI-V")
@@ -98,43 +75,6 @@ class IcomCIV(Radio):
         self._serial = None
         if serial_obj is not None:
             await asyncio.get_running_loop().run_in_executor(None, serial_obj.close)
-
-    # ------------------------------------------------------------------ #
-    # Radio interface
-    # ------------------------------------------------------------------ #
-    async def read_state(self) -> RadioState:
-        freq_payload = await self._transact(bytes([CMD_READ_FREQ]), response_cmd=CMD_READ_FREQ)
-        mode_payload = await self._transact(bytes([CMD_READ_MODE]), response_cmd=CMD_READ_MODE)
-        freq = bcd_to_freq(freq_payload[1:6]) if freq_payload and len(freq_payload) >= 6 else 0
-        mode = civ_to_mode(mode_payload[1]) if mode_payload and len(mode_payload) >= 2 else Mode.USB
-        return RadioState(freq_hz=freq, mode=mode)
-
-    async def set_frequency(self, freq_hz: int) -> None:
-        await self._transact(bytes([CMD_SET_FREQ]) + freq_to_bcd(freq_hz), ack=True)
-
-    async def set_mode(self, mode: Mode) -> None:
-        civ = mode_to_civ(mode)
-        if civ is None:
-            raise RadioUnsupported(f"Icom CI-V has no mapping for {mode}")
-        await self._transact(bytes([CMD_SET_MODE, civ]), ack=True)
-
-    async def set_ptt(self, on: bool) -> None:
-        await self._transact(bytes([CMD_PTT, 0x00, 0x01 if on else 0x00]), ack=True)
-
-    async def send_cw(self, text: str, wpm: int | None = None) -> None:
-        # CI-V "send CW message" (0x17) + ASCII; the radio keys it at its set speed.
-        await self._transact(bytes([CMD_SEND_CW]) + text.encode("ascii", "ignore"), expect=False)
-
-    async def stop_tx(self) -> None:
-        # 0x17 0xFF cancels CW; then drop PTT — best effort.
-        try:
-            await self._transact(bytes([CMD_SEND_CW, 0xFF]), expect=False)
-        except OSError:
-            pass
-        try:
-            await self._transact(bytes([CMD_PTT, 0x00, 0x00]), ack=True)
-        except OSError:
-            pass
 
     # ------------------------------------------------------------------ #
     # transport

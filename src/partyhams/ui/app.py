@@ -24,6 +24,7 @@ from partyhams.radio.civ_protocol import CIV_ADDR_IC705, CIV_ADDR_IC7610
 from partyhams.radio.flex import FlexRadio
 from partyhams.radio.hamlib import HamlibRadio
 from partyhams.radio.icom_civ import IcomCIV
+from partyhams.radio.icom_net import IcomNet
 from partyhams.ui.log_dialog import LogDialog
 from partyhams.ui.main_window import MainWindow
 from partyhams.ui.open_log_dialog import OpenLogDialog
@@ -86,6 +87,11 @@ def _poller_from_radio(radio: dict | None) -> RadioPoller | None:
     if kind in ("icom705", "icom7610"):  # conn is a serial port path
         addr = CIV_ADDR_IC705 if kind == "icom705" else CIV_ADDR_IC7610
         return RadioPoller(IcomCIV(conn, civ_address=addr))
+    if kind in ("icom705-lan", "icom7610-lan"):  # conn is the radio's IP/hostname
+        addr = CIV_ADDR_IC705 if kind == "icom705-lan" else CIV_ADDR_IC7610
+        return RadioPoller(
+            IcomNet(conn, radio.get("user", ""), radio.get("password", ""), civ_address=addr)
+        )
     host, _, port_str = conn.partition(":")
     host = host.strip() or None
     port = int(port_str) if port_str.strip().isdigit() else None

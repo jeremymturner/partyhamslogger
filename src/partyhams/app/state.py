@@ -27,7 +27,8 @@ class AppState:
     #: Absolute path to the log to reopen on launch (None => show log creation).
     current_log: str | None = None
     #: Saved radio choice, e.g. {"kind": "hamlib"|"flex"|"none", "conn": "..."}.
-    #: None means the radio prompt hasn't been answered yet.
+    #: Native-LAN Icom kinds also carry "user"/"password". None means the radio
+    #: prompt hasn't been answered yet.
     radio: dict | None = None
     #: Recently-used log paths, most-recent first (for the Recent Logs menu).
     recent_logs: list[str] = field(default_factory=list)
