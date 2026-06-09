@@ -75,6 +75,37 @@ format: $(STAMP) ## Auto-format and fix with ruff
 .PHONY: check
 check: lint test ## Lint and test (what CI will run)
 
+# ---- Packaging (PyInstaller; see docs/PACKAGING.md) ---------------------
+# Builds run on the host OS/arch only — there is no cross-compilation. The
+# packaging extra (PyInstaller) is installed on demand into the dev venv.
+PKG_STAMP := $(VENV)/.packaging
+
+$(PKG_STAMP): $(STAMP)
+	@echo ">> installing packaging deps (PyInstaller)"
+	@$(PIP) install -q -e ".[packaging]"
+	@touch $(PKG_STAMP)
+
+.PHONY: package
+package: $(PKG_STAMP) ## Build a standalone app for THIS OS (-> dist/)
+	@$(PY) -m PyInstaller --noconfirm --clean packaging/partyhams.spec
+	@echo ">> built dist/ (see docs/PACKAGING.md)"
+
+.PHONY: package-mac-universal
+package-mac-universal: $(PKG_STAMP) ## macOS universal2 .app (Intel + Apple Silicon)
+	@$(PY) -m PyInstaller --noconfirm --clean --target-arch universal2 packaging/partyhams.spec
+
+.PHONY: package-appimage
+package-appimage: package ## Linux AppImage (needs linuxdeploy + appimagetool)
+	@bash packaging/build-appimage.sh
+
+.PHONY: package-deb
+package-deb: package ## Linux .deb (needs fpm)
+	@bash packaging/build-linux-pkg.sh deb
+
+.PHONY: package-rpm
+package-rpm: package ## Linux .rpm (needs fpm)
+	@bash packaging/build-linux-pkg.sh rpm
+
 .PHONY: clean
 clean: ## Remove caches and build artifacts (keeps the venv)
 	@find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=PartyHams Logger
+Comment=Keyboard-first amateur-radio contest logger
+Exec=partyhams-logger
+Icon=partyhams
+Categories=HamRadio;Network;Utility;
+Terminal=false

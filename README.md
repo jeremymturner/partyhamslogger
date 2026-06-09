@@ -70,6 +70,14 @@ pytest
 python -m partyhams
 ```
 
+### Packaging a standalone build
+
+Build a self-contained app for the current platform with `make package`
+(Windows `.exe`, macOS `.app`, or Linux binary). AppImage / `.deb` / `.rpm`
+and macOS universal2 builds have their own `make package-*` targets. See
+[docs/PACKAGING.md](docs/PACKAGING.md) for prerequisites and per-platform notes
+— PyInstaller can't cross-compile, so each artifact builds on its own OS.
+
 ### Try the peer-to-peer sync (Phase-0 spike)
 
 See the multi-station log sync in action — run in two terminals (or on two
