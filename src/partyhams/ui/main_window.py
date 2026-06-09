@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from partyhams.app.banter import StationSnapshot, choose_message
 from partyhams.app.macros import bank_key, esm_step, expand, load_macros, save_macros
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, default_rst
@@ -330,10 +331,45 @@ class MainWindow(QMainWindow):
         self._roster_timer.timeout.connect(self._panel.refresh_roster)
         self._roster_timer.start()
 
+        # ContestBot: occasionally drop a fun automated message into the chat.
+        self._banter_prev: list[StationSnapshot] | None = None
+        self._banter_counter = 0
+        self._banter_timer = QTimer(self)
+        self._banter_timer.setInterval(60_000)  # once a minute
+        self._banter_timer.timeout.connect(self._banter_tick)
+        self._banter_timer.start()
+
     def _send_chat(self, to_op: str, text: str) -> None:
         self.session.post_chat(to_op, text)  # local echo via the chat listener
         if self._loop is not None and self._loop.is_running():
             self._loop.create_task(self.session.broadcast_chat(to_op, text))
+
+    def _banter_snapshot(self) -> list[StationSnapshot]:
+        """Build a plain-data activity snapshot for the banter engine."""
+        now = utcnow()
+        snaps = []
+        for row in self.session.roster():
+            stats = self.session.station_stats(row["station_id"])
+            last = stats["last"]
+            age = (now - last).total_seconds() / 60.0 if last else None
+            snaps.append(
+                StationSnapshot(
+                    operator=row["operator"] or row["call"],
+                    rate_15=row["rates"][15],
+                    total=row["total"],
+                    last_qso_age_min=age,
+                )
+            )
+        return snaps
+
+    def _banter_tick(self) -> None:
+        """Once a minute: maybe post a ContestBot message visible to everyone."""
+        snapshot = self._banter_snapshot()
+        self._banter_counter += 1
+        message = choose_message(snapshot, self._banter_prev, self._banter_counter)
+        self._banter_prev = snapshot
+        if message:
+            self._send_chat("*", message)  # local echo + broadcast to all peers
 
     def _request_full_log(self) -> None:
         if self._loop is not None and self._loop.is_running():
