@@ -35,6 +35,7 @@ class CalendarEvent:
     contest_id: str
     start: date
     end: date
+    always_on: bool = False  # POTA et al.: never shadow a dated, in-progress contest
 
     def contains(self, day: date) -> bool:
         return self.start <= day <= self.end
@@ -60,7 +61,8 @@ class _Rule:
     def event_for_year(self, year: int) -> CalendarEvent:
         if self.always_on or self.month is None:
             return CalendarEvent(
-                self.name, self.contest_id, date(year, 1, 1), date(year, 12, 31)
+                self.name, self.contest_id, date(year, 1, 1), date(year, 12, 31),
+                always_on=True,
             )
         start = _nth_weekday(year, self.month, self.weekday, self.nth)
         end = start + timedelta(days=self.duration_days - 1)
@@ -145,7 +147,9 @@ def upcoming_events(today: date | datetime) -> list[CalendarEvent]:
     """
     day = _as_date(today)
     events = _candidate_events(day)
-    events.sort(key=lambda e: (_distance(e, day), e.start, e.name))
+    # At equal distance, dated events beat always-on ones (POTA shouldn't shadow
+    # an in-progress contest); then nearer start, then name, for determinism.
+    events.sort(key=lambda e: (_distance(e, day), e.always_on, e.start, e.name))
     return events
 
 

@@ -48,6 +48,14 @@ def test_nearest_contest_id_none_when_nothing_registered() -> None:
     assert nearest_contest_id(date(2026, 6, 26), is_registered=lambda _id: False) is None
 
 
+def test_always_on_pota_does_not_shadow_in_progress_contest() -> None:
+    # With POTA (always-on) also registered, an in-progress dated contest still wins.
+    both = {"arrl-field-day", "pota"}.__contains__
+    assert nearest_contest_id(date(2026, 6, 28), is_registered=both) == "arrl-field-day"
+    # On a day with no dated contest nearby, always-on POTA is the sensible default.
+    assert nearest_contest_id(date(2026, 3, 10), is_registered=both) == "pota"
+
+
 def test_upcoming_events_sorted_by_proximity() -> None:
     today = date(2026, 6, 26)
     ordered = upcoming_events(today)
