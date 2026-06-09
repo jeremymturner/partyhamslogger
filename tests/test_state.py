@@ -25,6 +25,13 @@ def test_state_round_trip(tmp_path):
     assert loaded.radio == {"kind": "flex", "conn": ""}
 
 
+def test_theme_round_trip(tmp_path):
+    path = tmp_path / "state.json"
+    assert load_state(path).theme is None  # default: follow the OS
+    save_state(AppState(theme="Sand (warm)"), path)
+    assert load_state(path).theme == "Sand (warm)"
+
+
 def test_recent_logs_round_trip(tmp_path):
     path = tmp_path / "state.json"
     state = AppState()

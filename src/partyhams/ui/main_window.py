@@ -15,7 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QColor, QKeySequence, QShortcut
+from PySide6.QtGui import QActionGroup, QCloseEvent, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -46,11 +46,11 @@ from partyhams.core.models import (
 from partyhams.export import timestamped_adif_name
 from partyhams.radio.base import Capability, RadioState
 from partyhams.ui import shortcuts as sc
+from partyhams.ui import style
 from partyhams.ui.macros_dialog import MacrosDialog
 from partyhams.ui.network_panel import NetworkPanel
 from partyhams.ui.sections_window import SectionsWindow
 from partyhams.ui.shortcuts import ShortcutsDialog
-from partyhams.ui.style import ACCENT, AMBER, DUPE, MULT, MULT_BG, PEER, TEXT, TEXT_DIM
 from partyhams.ui.widgets import make_upper
 
 # Modes offered in the entry row.
@@ -91,6 +91,8 @@ class MainWindow(QMainWindow):
         self.on_open_log_path: Callable[[str], None] | None = None
         #: Returns recent logs as (path, label) pairs, most-recent first.
         self.recent_logs_provider: Callable[[], list[tuple[str, str]]] | None = None
+        #: Set by the app: on_change_theme(name) applies + persists a theme.
+        self.on_change_theme: Callable[[str], None] | None = None
         self._radio_dialog = None  # app keeps the open radio dialog alive here
         self._log_dialog = None  # app keeps the open new/open-log dialog alive here
         self._shortcuts_dialog = None  # the Keyboard Shortcuts dialog while open
@@ -266,9 +268,10 @@ class MainWindow(QMainWindow):
     def _update_fkey_bar(self) -> None:
         bank = self._current_bank()
         self._runsp_btn.setText("RUN" if self._run else "S&&P")
-        # RUN stands out in amber; S&P stays dark for contrast on the cyan button.
+        # RUN stands out in amber; S&P uses the on-accent color for contrast.
+        runsp_color = style.AMBER if self._run else style.ON_ACCENT
         self._runsp_btn.setStyleSheet(
-            f"QPushButton#fkey {{ color: {AMBER if self._run else '#0c1116'}; font-weight: 700; }}"
+            f"QPushButton#fkey {{ color: {runsp_color}; font-weight: 700; }}"
         )
         next_key = self._esm_next_key()
         for key, btn in enumerate(self._fkey_buttons, start=1):
@@ -278,7 +281,7 @@ class MainWindow(QMainWindow):
             btn.setEnabled(bool(macro and macro.content.strip()))
             # Highlight the key Enter would send next under ESM.
             if key == next_key:
-                btn.setStyleSheet(f"QPushButton#fkey {{ border: 2px solid {MULT}; }}")
+                btn.setStyleSheet(f"QPushButton#fkey {{ border: 2px solid {style.MULT}; }}")
             else:
                 btn.setStyleSheet("")
 
@@ -471,10 +474,46 @@ class MainWindow(QMainWindow):
         self._view_menu = self.menuBar().addMenu("View")
         sections = self._view_menu.addAction("Sections Worked…", self._open_sections)
         sections.setShortcut(QKeySequence(sc.SECTIONS))
+        self._build_theme_menu(self._view_menu)
 
         help_menu = self.menuBar().addMenu("Help")
         shortcuts = help_menu.addAction("Keyboard Shortcuts…", self._show_shortcuts)
         shortcuts.setShortcut(QKeySequence(sc.SHORTCUTS))
+
+    def _build_theme_menu(self, view_menu) -> None:
+        view_menu.addSeparator()
+        theme_menu = view_menu.addMenu("Theme")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        last_dark = True
+        for name, dark in style.theme_names():
+            if dark != last_dark:
+                theme_menu.addSeparator()  # divide dark from light themes
+                last_dark = dark
+            action = theme_menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == style.active_name())
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, n=name: self._change_theme(n))
+
+    def _change_theme(self, name: str) -> None:
+        if self.on_change_theme is not None:
+            self.on_change_theme(name)  # app applies, persists, and restyles
+        else:
+            from PySide6.QtWidgets import QApplication
+
+            style.apply_theme(QApplication.instance(), name)
+            self.restyle()
+
+    def restyle(self) -> None:
+        """Re-apply palette-derived inline styles after a live theme change."""
+        self._mult.setStyleSheet(f"font-weight: bold; color: {style.MULT};")
+        self._dupe.setStyleSheet(f"font-weight: bold; color: {style.DUPE};")
+        self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
+        self._update_fkey_bar()
+        self._update_radio_label()
+        self._panel.restyle()
+        self.refresh()  # rebuilds the score bar and CAT-aware indicators
 
     def _rebuild_recent_menu(self) -> None:
         self._recent_menu.clear()
@@ -525,15 +564,15 @@ class MainWindow(QMainWindow):
     def _update_radio_label(self) -> None:
         if self._poller is None:
             self._radio_status_label.setText("📻 No radio (manual)")
-            self._radio_status_label.setStyleSheet(f"color: {TEXT_DIM};")
+            self._radio_status_label.setStyleSheet(f"color: {style.TEXT_DIM};")
             return
         desc = self._poller.radio.description()
         if self._radio_connected:
             self._radio_status_label.setText(f"📻 {desc}")
-            self._radio_status_label.setStyleSheet(f"color: {MULT};")
+            self._radio_status_label.setStyleSheet(f"color: {style.MULT};")
         else:
             self._radio_status_label.setText(f"📻 {desc} · disconnected")
-            self._radio_status_label.setStyleSheet(f"color: {AMBER};")
+            self._radio_status_label.setStyleSheet(f"color: {style.AMBER};")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         # Hand control back to the app loop for graceful async shutdown.
@@ -610,18 +649,18 @@ class MainWindow(QMainWindow):
         # so its content changing doesn't shift the row.
         self._freq = QLabel()
         self._freq.setFixedWidth(140)
-        self._freq.setStyleSheet(f"color: {ACCENT}; font-weight: 600;")
+        self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
         hbox.addWidget(self._freq)
 
         # Status indicators: new-multiplier (green) and dupe (red). Both reserve a
         # fixed width so showing/hiding a badge never squishes the entry fields.
         self._mult = QLabel()
         self._mult.setFixedWidth(110)
-        self._mult.setStyleSheet(f"font-weight: bold; color: {MULT};")
+        self._mult.setStyleSheet(f"font-weight: bold; color: {style.MULT};")
         hbox.addWidget(self._mult)
         self._dupe = QLabel()
         self._dupe.setFixedWidth(75)
-        self._dupe.setStyleSheet(f"font-weight: bold; color: {DUPE};")
+        self._dupe.setStyleSheet(f"font-weight: bold; color: {style.DUPE};")
         hbox.addWidget(self._dupe)
 
         hbox.addStretch(1)
@@ -699,13 +738,13 @@ class MainWindow(QMainWindow):
         if self._cat:
             if self._radio_connected:
                 self._freq.setText(f"📻 {text}")
-                self._freq.setStyleSheet(f"color: {ACCENT}; font-weight: 600;")
+                self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
             else:
                 self._freq.setText("📻 no radio")
-                self._freq.setStyleSheet(f"color: {AMBER}; font-weight: 600;")
+                self._freq.setStyleSheet(f"color: {style.AMBER}; font-weight: 600;")
         else:
             self._freq.setText(text)
-            self._freq.setStyleSheet(f"color: {TEXT_DIM};")
+            self._freq.setStyleSheet(f"color: {style.TEXT_DIM};")
 
     # ------------------------------------------------------------------ #
     # entry behavior
@@ -717,7 +756,7 @@ class MainWindow(QMainWindow):
             self._esm_sent = False  # new QSO starts unsent
         freq, mode = self._current_freq(), self._current_mode()
         is_dupe = bool(call) and self.session.is_dupe(call, freq, mode)
-        self._dupe.setText("● DUPE" if is_dupe else "")
+        self._dupe.setText("● style.DUPE" if is_dupe else "")
 
         exchange = {name: e.text().strip().upper() for name, e in self._exchange_edits.items()}
         new = self.session.new_mults(call, freq, mode, exchange) if call and not is_dupe else set()
@@ -727,7 +766,9 @@ class MainWindow(QMainWindow):
         for field in self.session.contest.exchange_fields():
             edit = self._exchange_edits[field.name]
             if field.name in new_types and edit.text().strip():
-                edit.setStyleSheet(f"border: 1px solid {MULT}; background-color: {MULT_BG};")
+                edit.setStyleSheet(
+                    f"border: 1px solid {style.MULT}; background-color: {style.MULT_BG};"
+                )
             else:
                 edit.setStyleSheet("")
 
@@ -799,7 +840,7 @@ class MainWindow(QMainWindow):
 
     def _flash(self, widget: QLineEdit) -> None:
         """Briefly outline a field in red to signal a problem."""
-        widget.setStyleSheet(f"border: 1px solid {DUPE}; background-color: #3a2326;")
+        widget.setStyleSheet(f"border: 1px solid {style.DUPE}; background-color: #3a2326;")
         QTimer.singleShot(900, lambda: widget.setStyleSheet(""))
 
     # ------------------------------------------------------------------ #
@@ -814,24 +855,27 @@ class MainWindow(QMainWindow):
         s = self.session.score()
         mult = s.breakdown.get("power_multiplier", 1)
         peers = len(self.session.peers)
-        peer_txt = f" &nbsp;|&nbsp; Peers <b style='color:{PEER}'>{peers}</b>" if peers else ""
+        peer_txt = (
+            f" &nbsp;|&nbsp; Peers <b style='color:{style.PEER}'>{peers}</b>" if peers else ""
+        )
         call = self.session.config.my_call
         operator = self.session.engine.operator
         name = self.session.contest.name
         mult_label = self.session.contest.mult_label
         op_txt = (
-            f" <span style='color:{TEXT_DIM}'>op</span> {operator}"
+            f" <span style='color:{style.TEXT_DIM}'>op</span> {operator}"
             if operator and operator != call
             else ""
         )
         self._score_label.setText(
-            f"<span style='color:{TEXT_DIM}'>Station</span> "
-            f"<b style='color:{ACCENT}'>{call}</b>{op_txt} &nbsp;·&nbsp; {name} &nbsp;|&nbsp; "
-            f"QSOs <b style='color:{TEXT}'>{s.qso_count}</b> &nbsp; "
-            f"Pts <b style='color:{TEXT}'>{s.qso_points}</b> &nbsp; "
-            f"{mult_label} <b style='color:{MULT}'>{s.mult_count}</b> &nbsp; "
-            f"Pwr <b style='color:{AMBER}'>×{mult}</b> &nbsp; "
-            f"Score <b style='color:{AMBER}'>{s.total}</b>{peer_txt}"
+            f"<span style='color:{style.TEXT_DIM}'>Station</span> "
+            f"<b style='color:{style.ACCENT}'>{call}</b>{op_txt} &nbsp;·&nbsp; {name} "
+            f"&nbsp;|&nbsp; "
+            f"QSOs <b style='color:{style.TEXT}'>{s.qso_count}</b> &nbsp; "
+            f"Pts <b style='color:{style.TEXT}'>{s.qso_points}</b> &nbsp; "
+            f"{mult_label} <b style='color:{style.MULT}'>{s.mult_count}</b> &nbsp; "
+            f"Pwr <b style='color:{style.AMBER}'>×{mult}</b> &nbsp; "
+            f"Score <b style='color:{style.AMBER}'>{s.total}</b>{peer_txt}"
         )
 
     def _reload_table(self) -> None:
@@ -850,7 +894,7 @@ class MainWindow(QMainWindow):
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)
                 if is_peer:
-                    item.setForeground(QColor(PEER))
+                    item.setForeground(QColor(style.PEER))
                 self._table.setItem(row, col, item)
 
     # ------------------------------------------------------------------ #

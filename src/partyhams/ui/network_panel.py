@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from partyhams.app.session import LogSession
-from partyhams.ui.style import ACCENT, AMBER, MULT, PEER, TEXT_DIM
+from partyhams.ui import style
 
 _COLUMNS = ["Op", "Freq", "Mode", "15m", "60m", "All"]
 
@@ -61,7 +61,8 @@ class NetworkPanel(QWidget):
         stations = QWidget()
         sv = QVBoxLayout(stations)
         sv.setContentsMargins(6, 6, 6, 2)
-        sv.addWidget(self._section_label("Stations"))
+        self._station_label = self._section_label("Stations")
+        sv.addWidget(self._station_label)
         self._table = QTableWidget(0, len(_COLUMNS))
         self._table.setHorizontalHeaderLabels(_COLUMNS)
         self._table.verticalHeader().setVisible(False)
@@ -87,7 +88,8 @@ class NetworkPanel(QWidget):
         chat = QWidget()
         cv = QVBoxLayout(chat)
         cv.setContentsMargins(6, 2, 6, 6)
-        cv.addWidget(self._section_label("Chat"))
+        self._chat_label = self._section_label("Chat")
+        cv.addWidget(self._chat_label)
         self._chat_view = QTextEdit()
         self._chat_view.setReadOnly(True)
         cv.addWidget(self._chat_view, stretch=1)
@@ -114,8 +116,14 @@ class NetworkPanel(QWidget):
     @staticmethod
     def _section_label(text: str) -> QLabel:
         label = QLabel(text)
-        label.setStyleSheet(f"color: {TEXT_DIM}; font-weight: 600; padding: 2px;")
+        label.setStyleSheet(f"color: {style.TEXT_DIM}; font-weight: 600; padding: 2px;")
         return label
+
+    def restyle(self) -> None:
+        """Re-apply palette colors after a live theme change."""
+        for label in (self._station_label, self._chat_label):
+            label.setStyleSheet(f"color: {style.TEXT_DIM}; font-weight: 600; padding: 2px;")
+        self.refresh_roster()  # re-colors the self/stale row foregrounds
 
     # ------------------------------------------------------------------ #
     # roster
@@ -138,9 +146,9 @@ class NetworkPanel(QWidget):
                 if col >= 3:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if r["is_self"]:
-                    item.setForeground(QColor(ACCENT))
+                    item.setForeground(QColor(style.ACCENT))
                 elif r["stale"]:
-                    item.setForeground(QColor(TEXT_DIM))
+                    item.setForeground(QColor(style.TEXT_DIM))
                 self._table.setItem(i, col, item)
 
         ops = self.session.operators()
@@ -168,15 +176,15 @@ class NetworkPanel(QWidget):
         when = _short_time(entry["ts"])
         if entry["incoming"]:
             who = entry["from_op"]
-            color = PEER
+            color = style.PEER
             arrow = "" if target == "all" else " →you"
             header = f"{who}{arrow}"
         else:
-            color = MULT if target == "all" else AMBER
+            color = style.MULT if target == "all" else style.AMBER
             header = f"you→{target}"
         text = entry["text"].replace("<", "&lt;").replace(">", "&gt;")
         self._chat_view.append(
-            f"<span style='color:{TEXT_DIM}'>{when}</span> "
+            f"<span style='color:{style.TEXT_DIM}'>{when}</span> "
             f"<b style='color:{color}'>{header}:</b> {text}"
         )
 

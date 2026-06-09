@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from partyhams.ui.style import BORDER, TEXT, TEXT_DIM
+from partyhams.ui import style
 
 # Menu/command shortcuts. These constants are imported by the main window and
 # assigned to the matching QActions.
@@ -70,7 +70,7 @@ class ShortcutsDialog(QDialog):
         outer = QVBoxLayout(self)
         for title, rows, literal in (("Commands", COMMANDS, False), ("Operating", OPERATING, True)):
             header = QLabel(f"<b>{title}</b>")
-            header.setStyleSheet(f"color: {TEXT_DIM}; margin-top: 6px;")
+            header.setStyleSheet(f"color: {style.TEXT_DIM}; margin-top: 6px;")
             outer.addWidget(header)
             grid = QGridLayout()
             grid.setColumnMinimumWidth(0, 110)
@@ -80,7 +80,7 @@ class ShortcutsDialog(QDialog):
             for row, (keys, desc) in enumerate(rows):
                 chip = QLabel(keys if literal else fmt_keys(keys))
                 chip.setStyleSheet(
-                    f"QLabel {{ background: {BORDER}; color: {TEXT};"
+                    f"QLabel {{ background: {style.BORDER}; color: {style.TEXT};"
                     f" border-radius: 4px; padding: 1px 7px; }}"
                 )
                 grid.addWidget(chip, row, 0)

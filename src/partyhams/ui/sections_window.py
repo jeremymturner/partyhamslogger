@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from partyhams.app.session import LogSession
 from partyhams.contest.sections import SECTION_GROUPS
-from partyhams.ui.style import ACCENT, BORDER, MULT, TEXT, TEXT_DIM
+from partyhams.ui import style
 
 # Bands shown as pips, left→right. (Sections worked on other bands still count as
 # worked; these are just the columns drawn.)
@@ -48,11 +48,11 @@ class SectionsWindow(QWidget):
         self._counter = QLabel()
         legend = QLabel(
             f"bands L→R: {' '.join(b.replace('m', '') for b in _BAND_ORDER)} &nbsp;·&nbsp; "
-            f"<span style='color:{MULT}'>■</span> worked &nbsp; "
-            f"<span style='color:{BORDER}'>■</span> needed"
+            f"<span style='color:{style.MULT}'>■</span> worked &nbsp; "
+            f"<span style='color:{style.BORDER}'>■</span> needed"
         )
         legend.setTextFormat(Qt.TextFormat.RichText)
-        legend.setStyleSheet(f"color: {TEXT_DIM};")
+        legend.setStyleSheet(f"color: {style.TEXT_DIM};")
 
         top = QHBoxLayout()
         top.addWidget(QLabel("Mode"))
@@ -74,7 +74,7 @@ class SectionsWindow(QWidget):
             block_layout = QVBoxLayout(block)
             block_layout.setContentsMargins(0, 0, 0, 0)
             block_layout.setSpacing(1)
-            header = QLabel(f"<b style='color:{ACCENT}'>{dist}</b>")
+            header = QLabel(f"<b style='color:{style.ACCENT}'>{dist}</b>")
             block_layout.addWidget(header)
             for section in sections:
                 name = QLabel()
@@ -116,16 +116,17 @@ class SectionsWindow(QWidget):
             if worked:
                 worked_count += 1
             name_label.setText(
-                f"<span style='color:{MULT if worked else TEXT_DIM}'>{section}</span>"
+                f"<span style='color:{style.MULT if worked else style.TEXT_DIM}'>{section}</span>"
             )
             name_label.setToolTip(
                 ", ".join(sorted(f"{b} {m}" for b, m in slots)) if slots else "not worked"
             )
             pips = "".join(
-                f"<span style='color:{MULT if band in bands_worked else BORDER}'>■</span>"
+                f"<span style='color:{style.MULT if band in bands_worked else style.BORDER}'>"
+                "■</span>"
                 for band in _BAND_ORDER
             )
             pips_label.setText(pips)
         self._counter.setText(
-            f"<b style='color:{TEXT}'>{worked_count}</b> / {len(self._rows)} worked"
+            f"<b style='color:{style.TEXT}'>{worked_count}</b> / {len(self._rows)} worked"
         )

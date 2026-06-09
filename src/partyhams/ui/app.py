@@ -159,12 +159,12 @@ def run() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setWindowIcon(app_icon())  # window/taskbar; also the macOS dock tile
-    apply_theme(app)
     app.setQuitOnLastWindowClosed(False)
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
     state = load_state()
+    apply_theme(app, state.theme)  # saved theme, or the OS-matching default
     session = _open_or_create_log(state)
     if session is None:
         return 0
@@ -191,6 +191,7 @@ def run() -> int:
             window.on_open_log = lambda w=window: _open_log_flow(w)
             window.on_open_log_path = _open_recent
             window.recent_logs_provider = _recent_entries
+            window.on_change_theme = _change_theme
             window.show()
             ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
             window.set_poller(ctx["poller"])
@@ -284,6 +285,14 @@ def run() -> int:
             await ctx["poller"].stop()
         ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
         window.set_poller(ctx["poller"])
+
+    # --- theme change (live) ---
+    def _change_theme(name: str) -> None:
+        state.theme = apply_theme(app, name)
+        save_state(state)
+        for win in app.topLevelWidgets():
+            if isinstance(win, MainWindow):
+                win.restyle()
 
     with loop:
         loop.run_until_complete(amain())

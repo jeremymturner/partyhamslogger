@@ -32,6 +32,8 @@ class AppState:
     radio: dict | None = None
     #: Recently-used log paths, most-recent first (for the Recent Logs menu).
     recent_logs: list[str] = field(default_factory=list)
+    #: Selected UI theme name (None => follow the OS light/dark setting).
+    theme: str | None = None
 
 
 def load_state(path: Path = STATE_FILE) -> AppState:
@@ -43,6 +45,7 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         current_log=data.get("current_log"),
         radio=data.get("radio"),
         recent_logs=data.get("recent_logs") or [],
+        theme=data.get("theme"),
     )
 
 
@@ -52,6 +55,7 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "current_log": state.current_log,
         "radio": state.radio,
         "recent_logs": state.recent_logs,
+        "theme": state.theme,
     }
     path.write_text(json.dumps(payload, indent=2))
 

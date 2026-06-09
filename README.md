@@ -45,6 +45,8 @@ Enter walks the exchange fields, Enter logs. Live score and dupe checking update
 as you go; **Export ADIF / Cabrillo** when you're done. The log is also
 auto-saved to a timestamped ADIF backup every 5 minutes (in an `adif-backups/`
 folder next to the log file) so a crash never costs you more than a few QSOs.
+Pick a look under **View → Theme** — three dark and three light schemes, defaulting
+to match your OS appearance.
 
 ## Getting started (dev)
 
