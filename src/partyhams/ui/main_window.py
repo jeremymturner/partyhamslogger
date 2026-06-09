@@ -110,9 +110,15 @@ class MainWindow(QMainWindow):
         self._setup_fkey_shortcuts()
 
         session.add_listener(self.refresh)
-        # Permanent radio indicator on the right of the status bar.
+        # Permanent radio indicator on the right of the status bar. Give it room and
+        # center the text vertically so the rig description isn't cramped.
         self._radio_status_label = QLabel()
+        self._radio_status_label.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+        )
+        self._radio_status_label.setMinimumWidth(240)
         self.statusBar().addPermanentWidget(self._radio_status_label)
+        self.statusBar().setSizeGripEnabled(False)
 
         self._build_network_panel()
         self.set_poller(radio_poller)

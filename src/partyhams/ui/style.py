@@ -128,8 +128,14 @@ QHeaderView::section {{
 QTableWidget::item {{ padding: 3px 6px; }}
 QTableWidget::item:selected {{ background-color: {ACCENT}; color: #ffffff; }}
 
-QStatusBar {{ background-color: {BG_DARK}; color: {TEXT_DIM}; }}
+QStatusBar {{
+    background-color: {BG_DARK};
+    color: {TEXT_DIM};
+    min-height: 28px;
+    padding: 2px 10px;
+}}
 QStatusBar::item {{ border: none; }}
+QStatusBar QLabel {{ padding: 2px 4px; }}
 
 QScrollBar:vertical {{ background: {BG_PANEL}; width: 12px; margin: 0; }}
 QScrollBar::handle:vertical {{
