@@ -429,6 +429,38 @@ class LogSession:
                 status.setdefault(section, set()).add((qso.band_label, qso.mode_group.value))
         return status
 
+    def section_detail(self, section: str) -> list[dict]:
+        """Who worked ``section``, for the map's detail panel.
+
+        Returns one row per operator that logged a QSO whose received section
+        matches, each ``{"operator", "calls", "bands", "modes", "count"}`` where
+        ``calls``/``bands``/``modes`` are sorted lists of the distinct values and
+        ``count`` is the number of QSOs. Pure and Qt-free, so it's unit-tested.
+        Sorted by operator name. Empty list when the section is unworked.
+        """
+        target = section.upper()
+        by_op: dict[str, dict[str, set[str] | int]] = {}
+        for qso in self.engine.log.qsos():
+            if qso.exchange_rcvd.get("section", "").upper() != target:
+                continue
+            row = by_op.setdefault(
+                qso.operator, {"calls": set(), "bands": set(), "modes": set(), "count": 0}
+            )
+            row["calls"].add(qso.call)  # type: ignore[union-attr]
+            row["bands"].add(qso.band_label)  # type: ignore[union-attr]
+            row["modes"].add(qso.mode_group.value)  # type: ignore[union-attr]
+            row["count"] += 1  # type: ignore[operator]
+        return [
+            {
+                "operator": op,
+                "calls": sorted(row["calls"]),  # type: ignore[arg-type]
+                "bands": sorted(row["bands"]),  # type: ignore[arg-type]
+                "modes": sorted(row["modes"]),  # type: ignore[arg-type]
+                "count": row["count"],
+            }
+            for op, row in sorted(by_op.items())
+        ]
+
     # ------------------------------------------------------------------ #
     # export
     # ------------------------------------------------------------------ #
