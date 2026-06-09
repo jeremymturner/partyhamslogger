@@ -32,6 +32,16 @@ for cand in ("icon.icns", "icon.ico"):
 # Bundle the app icon (loaded at runtime via Path(__file__).parent in ui/style.py)
 # and make sure the self-registering radio/contest backends are pulled in.
 datas = [(ICON_SVG, os.path.join("partyhams", "ui", "assets"))]
+
+# Bundle the user-guide docs so the in-app Help viewer works from a packaged
+# build (resolved at runtime via sys._MEIPASS in ui/help_window.py:find_docs_dir).
+for _sub in ("guide", "screenshots"):
+    _src = os.path.join(ROOT, "docs", _sub)
+    if os.path.isdir(_src):
+        datas.append((_src, os.path.join("docs", _sub)))
+_wsjtx = os.path.join(ROOT, "docs", "WSJTX.md")
+if os.path.isfile(_wsjtx):
+    datas.append((_wsjtx, "docs"))
 hiddenimports = (
     collect_submodules("partyhams.radio")
     + collect_submodules("partyhams.contest")
