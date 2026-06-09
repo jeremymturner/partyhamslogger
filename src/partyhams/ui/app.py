@@ -29,7 +29,7 @@ from partyhams.ui.log_dialog import LogDialog
 from partyhams.ui.main_window import MainWindow
 from partyhams.ui.open_log_dialog import OpenLogDialog
 from partyhams.ui.radio_dialog import RadioDialog
-from partyhams.ui.style import app_icon, apply_theme
+from partyhams.ui.style import app_icon, apply_font, apply_theme
 
 APP_NAME = "PartyHams Logger"
 
@@ -165,6 +165,7 @@ def run() -> int:
 
     state = load_state()
     apply_theme(app, state.theme)  # saved theme, or the OS-matching default
+    apply_font(app, state.font_family, state.font_size)  # saved base font
     session = _open_or_create_log(state)
     if session is None:
         return 0
@@ -192,6 +193,7 @@ def run() -> int:
             window.on_open_log_path = _open_recent
             window.recent_logs_provider = _recent_entries
             window.on_change_theme = _change_theme
+            window.on_change_font = _change_font
             window.on_autocq_interval = _change_autocq_interval
             window.set_autocq_interval(state.autocq_interval)
             window.show()
@@ -296,6 +298,14 @@ def run() -> int:
     # --- theme change (live) ---
     def _change_theme(name: str) -> None:
         state.theme = apply_theme(app, name)
+        save_state(state)
+        for win in app.topLevelWidgets():
+            if isinstance(win, MainWindow):
+                win.restyle()
+
+    # --- font change (live + persisted) ---
+    def _change_font(family: str | None, size: int) -> None:
+        state.font_family, state.font_size = apply_font(app, family, size)
         save_state(state)
         for win in app.topLevelWidgets():
             if isinstance(win, MainWindow):

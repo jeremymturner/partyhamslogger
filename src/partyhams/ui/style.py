@@ -20,6 +20,20 @@ from PySide6.QtWidgets import QApplication
 
 ICON_PATH = Path(__file__).parent / "assets" / "icon.svg"
 
+#: Base UI font, applied app-wide and orthogonal to the colour palette. The
+#: size feeds the QSS base ``font-size`` (so the whole UI scales); the family
+#: is set via ``QApplication.setFont``. ``None`` family means the Qt default.
+DEFAULT_FONT_SIZE = 13
+MIN_FONT_SIZE = 8
+MAX_FONT_SIZE = 28
+_font_family: str | None = None
+_font_size: int = DEFAULT_FONT_SIZE
+
+
+def clamp_font_size(size: int) -> int:
+    """Clamp a requested point size to the supported range (8..28)."""
+    return max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, int(size)))
+
 
 @dataclass(frozen=True)
 class Palette:
@@ -113,12 +127,12 @@ _active: Palette = _MIDNIGHT
 
 
 def build_qss(p: Palette) -> str:
-    """Render the app-wide stylesheet for a palette."""
+    """Render the app-wide stylesheet for a palette (using the active font size)."""
     return f"""
 QWidget {{
     background-color: {p.bg};
     color: {p.text};
-    font-size: 13px;
+    font-size: {_font_size}px;
     selection-background-color: {p.accent};
     selection-color: {p.on_accent};
 }}
@@ -236,6 +250,29 @@ def active_name() -> str:
     return _active.name
 
 
+def active_font() -> tuple[str | None, int]:
+    """The active base font as ``(family, size)`` (family None => Qt default)."""
+    return _font_family, _font_size
+
+
+def _apply_app_font(app: QApplication) -> None:
+    """Push the active family onto the QApplication font (size lives in QSS)."""
+    font = app.font()
+    if _font_family:
+        font.setFamily(_font_family)
+    app.setFont(font)
+
+
+def apply_font(app: QApplication, family: str | None, size: int) -> tuple[str | None, int]:
+    """Set the app-wide base font, re-rendering the stylesheet. Size clamped 8..28."""
+    global _font_family, _font_size
+    _font_family = family or None
+    _font_size = clamp_font_size(size)
+    _apply_app_font(app)
+    app.setStyleSheet(build_qss(_active))
+    return _font_family, _font_size
+
+
 def system_is_dark(app: QApplication) -> bool:
     """Best-effort OS dark-mode detection."""
     try:
@@ -272,6 +309,7 @@ def apply_theme(app: QApplication, name: str | None = None) -> str:
     PEER, DUPE, MULT, MULT_BG = palette.peer, palette.dupe, palette.mult, palette.mult_bg
     ON_ACCENT = palette.on_accent
     app.setStyle("Fusion")
+    _apply_app_font(app)  # keep the user's font across theme switches
     app.setStyleSheet(build_qss(palette))
     return palette.name
 

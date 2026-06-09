@@ -118,6 +118,8 @@ class MainWindow(QMainWindow):
         self.recent_logs_provider: Callable[[], list[tuple[str, str]]] | None = None
         #: Set by the app: on_change_theme(name) applies + persists a theme.
         self.on_change_theme: Callable[[str], None] | None = None
+        #: Set by the app: on_change_font(family, size) applies + persists a font.
+        self.on_change_font: Callable[[str | None, int], None] | None = None
         self._radio_dialog = None  # app keeps the open radio dialog alive here
         self._log_dialog = None  # app keeps the open new/open-log dialog alive here
         self._shortcuts_dialog = None  # the Keyboard Shortcuts dialog while open
@@ -560,6 +562,7 @@ class MainWindow(QMainWindow):
         sections = self._view_menu.addAction("Sections Worked…", self._open_sections)
         sections.setShortcut(QKeySequence(sc.SECTIONS))
         self._build_theme_menu(self._view_menu)
+        self._view_menu.addAction("Font…", self._choose_font)
 
         help_menu = self.menuBar().addMenu("Help")
         shortcuts = help_menu.addAction("Keyboard Shortcuts…", self._show_shortcuts)
@@ -611,6 +614,24 @@ class MainWindow(QMainWindow):
             from PySide6.QtWidgets import QApplication
 
             style.apply_theme(QApplication.instance(), name)
+            self.restyle()
+
+    def _choose_font(self) -> None:
+        from PySide6.QtGui import QFont
+        from PySide6.QtWidgets import QFontDialog
+
+        family, size = style.active_font()
+        current = QFont(family, size) if family else QFont()
+        current.setPointSize(size)
+        font, ok = QFontDialog.getFont(current, self, "Choose Font")
+        if not ok:
+            return
+        if self.on_change_font is not None:
+            self.on_change_font(font.family(), font.pointSize())  # app applies + persists
+        else:
+            from PySide6.QtWidgets import QApplication
+
+            style.apply_font(QApplication.instance(), font.family(), font.pointSize())
             self.restyle()
 
     def restyle(self) -> None:

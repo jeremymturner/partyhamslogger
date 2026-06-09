@@ -36,6 +36,9 @@ class AppState:
     theme: str | None = None
     #: Auto-CQ repeat interval in seconds (clamped to 5..30 when used).
     autocq_interval: int = 10
+    #: Base UI font family (None => Qt default) and point size (clamped 8..28).
+    font_family: str | None = None
+    font_size: int = 13
 
 
 def load_state(path: Path = STATE_FILE) -> AppState:
@@ -49,6 +52,8 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         recent_logs=data.get("recent_logs") or [],
         theme=data.get("theme"),
         autocq_interval=data.get("autocq_interval", 10),
+        font_family=data.get("font_family"),
+        font_size=data.get("font_size", 13),
     )
 
 
@@ -60,6 +65,8 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "recent_logs": state.recent_logs,
         "theme": state.theme,
         "autocq_interval": state.autocq_interval,
+        "font_family": state.font_family,
+        "font_size": state.font_size,
     }
     path.write_text(json.dumps(payload, indent=2))
 
