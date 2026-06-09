@@ -57,6 +57,15 @@ from partyhams.ui.widgets import make_upper
 _ENTRY_MODES = [Mode.CW, Mode.USB, Mode.LSB, Mode.FM, Mode.RTTY, Mode.FT8]
 
 
+def _format_tx_status(word: str, key: int, label: str, text: str) -> str:
+    """Build the transmit indicator shown on the left of the status bar.
+
+    ``word`` is ``TRANSMITTING`` while sending, then ``SENT`` once done.
+    """
+    label_part = f" — {label}" if label else ""
+    return f"{word} — F{key}{label_part} — {text}"
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -297,12 +306,12 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Digital macros not supported yet", 3000)
             return
         if group == "PHONE":
-            self._play_wav(macro.content)
+            self._play_wav(macro.content, tx_desc=(key, macro.label, Path(macro.content).name))
             return
         # CW / text
         text, actions = expand(macro.content, self._macro_context())
         if text:
-            self._send_cw(text)
+            self._send_cw(text, tx_desc=(key, macro.label, text))
         for action in actions:
             if action == "log":
                 self._try_log()
@@ -362,22 +371,33 @@ class MainWindow(QMainWindow):
                 return
         self._call.setFocus()
 
-    def _send_cw(self, text: str) -> None:
+    def _send_cw(self, text: str, tx_desc: tuple[int, str, str] | None = None) -> None:
         radio = self._poller.radio if self._poller is not None else None
         if radio is None or not radio.supports(Capability.SEND_CW):
             self.statusBar().showMessage("No CW keyer — configure a radio", 3000)
             return
+        if tx_desc is not None:
+            self._show_tx_status("TRANSMITTING", tx_desc, timeout=0)
         if self._loop is not None and self._loop.is_running():
-            self._loop.create_task(self._do_send_cw(radio, text))
+            self._loop.create_task(self._do_send_cw(radio, text, tx_desc))
 
-    async def _do_send_cw(self, radio, text: str) -> None:
+    async def _do_send_cw(
+        self, radio, text: str, tx_desc: tuple[int, str, str] | None = None
+    ) -> None:
         try:
             await radio.send_cw(text, wpm=self._macros.cw_wpm)
-            self.statusBar().showMessage(f"CW: {text}", 2500)
+            if tx_desc is not None:
+                self._show_tx_status("SENT", tx_desc, timeout=5000)
+            else:
+                self.statusBar().showMessage(f"CW: {text}", 2500)
         except Exception as exc:  # noqa: BLE001 - surface keyer errors, don't crash
             self.statusBar().showMessage(f"CW failed: {exc}", 4000)
 
-    def _play_wav(self, path: str) -> None:
+    def _show_tx_status(self, word: str, tx_desc: tuple[int, str, str], timeout: int) -> None:
+        """Left-of-status indicator: ``TRANSMITTING — F1 — CQ — CQ FD W7ABC``."""
+        self.statusBar().showMessage(_format_tx_status(word, *tx_desc), timeout)
+
+    def _play_wav(self, path: str, tx_desc: tuple[int, str, str] | None = None) -> None:
         if not path:
             self.statusBar().showMessage("No audio assigned to that key", 2500)
             return
@@ -392,7 +412,15 @@ class MainWindow(QMainWindow):
             return
         self._sound = QSoundEffect(self)
         self._sound.setSource(QUrl.fromLocalFile(path))
+        if tx_desc is not None:
+            self._show_tx_status("TRANSMITTING", tx_desc, timeout=0)
+            # Flip to SENT once playback stops.
+            self._sound.playingChanged.connect(lambda: self._on_wav_playing_changed(tx_desc))
         self._sound.play()
+
+    def _on_wav_playing_changed(self, tx_desc: tuple[int, str, str]) -> None:
+        if self._sound is not None and not self._sound.isPlaying():
+            self._show_tx_status("SENT", tx_desc, timeout=5000)
 
     def _wipe_entry(self) -> None:
         self._call.clear()
