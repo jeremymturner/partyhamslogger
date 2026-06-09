@@ -78,7 +78,16 @@ class SyncEngine:
         # station_id -> {operator, call, freq_hz, mode, last_heard} for peers.
         self.stations: dict[str, dict] = {}
         # Our own current operating state, broadcast periodically.
-        self._status = {"operator": operator, "call": call, "freq_hz": 0, "mode": Mode.CW.value}
+        # power_w/swr default 0 (unknown); ft_tx_even -1 (unknown).
+        self._status = {
+            "operator": operator,
+            "call": call,
+            "freq_hz": 0,
+            "mode": Mode.CW.value,
+            "power_w": 0.0,
+            "swr": 0.0,
+            "ft_tx_even": -1,
+        }
         self._tasks: list[asyncio.Task] = []
         self._running = False
 
@@ -185,13 +194,33 @@ class SyncEngine:
     # ------------------------------------------------------------------ #
     # presence + chat
     # ------------------------------------------------------------------ #
-    def update_status(self, *, freq_hz: int, mode: str, operator: str | None = None) -> None:
-        """Update our current operating state (broadcast by the presence loop)."""
+    def update_status(
+        self,
+        *,
+        freq_hz: int,
+        mode: str,
+        operator: str | None = None,
+        power_w: float | None = None,
+        swr: float | None = None,
+        ft_tx_even: int | None = None,
+    ) -> None:
+        """Update our current operating state (broadcast by the presence loop).
+
+        ``power_w``/``swr``/``ft_tx_even`` are optional; ``None`` leaves the
+        previously-broadcast value untouched so a caller that only knows the
+        freq/mode doesn't wipe a power reading it set earlier.
+        """
         if operator:
             self._status["operator"] = operator
             self.operator = operator
         self._status["freq_hz"] = freq_hz
         self._status["mode"] = mode
+        if power_w is not None:
+            self._status["power_w"] = power_w
+        if swr is not None:
+            self._status["swr"] = swr
+        if ft_tx_even is not None:
+            self._status["ft_tx_even"] = ft_tx_even
 
     async def send_status(self) -> None:
         await self.transport.send(
@@ -200,6 +229,9 @@ class SyncEngine:
                 call=self.call,
                 freq_hz=int(self._status["freq_hz"]),
                 mode=str(self._status["mode"]),
+                power_w=float(self._status["power_w"]),
+                swr=float(self._status["swr"]),
+                ft_tx_even=int(self._status["ft_tx_even"]),
             )
         )
 
@@ -277,6 +309,9 @@ class SyncEngine:
                 "call": message.call,
                 "freq_hz": message.freq_hz,
                 "mode": message.mode,
+                "power_w": message.power_w,
+                "swr": message.swr,
+                "ft_tx_even": message.ft_tx_even,
                 "last_heard": utcnow(),
             }
             self.peers[sender] = message.call or message.operator or sender
