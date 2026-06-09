@@ -520,7 +520,7 @@ class MainWindow(QMainWindow):
     def restyle(self) -> None:
         """Re-apply palette-derived inline styles after a live theme change."""
         self._mult.setStyleSheet(f"font-weight: bold; color: {style.MULT};")
-        self._dupe.setStyleSheet(f"font-weight: bold; color: {style.DUPE};")
+        # The dupe banner's style is re-applied (palette-aware) by refresh() below.
         self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
         self._update_fkey_bar()
         self._update_radio_label()
@@ -677,8 +677,8 @@ class MainWindow(QMainWindow):
         self._mult.setStyleSheet(f"font-weight: bold; color: {style.MULT};")
         hbox.addWidget(self._mult)
         self._dupe = QLabel()
-        self._dupe.setFixedWidth(75)
-        self._dupe.setStyleSheet(f"font-weight: bold; color: {style.DUPE};")
+        self._dupe.setMinimumWidth(260)
+        self._dupe.setStyleSheet(self._dupe_style())
         hbox.addWidget(self._dupe)
 
         hbox.addStretch(1)
@@ -767,14 +767,24 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # entry behavior
     # ------------------------------------------------------------------ #
+    def _dupe_style(self) -> str:
+        """Inline style for the dupe banner: bold red text on a tinted backing."""
+        return (
+            f"font-weight: bold; color: {style.DUPE}; "
+            f"border: 1px solid {style.DUPE}; border-radius: 3px; padding: 2px 6px;"
+        )
+
     def _refresh_indicators(self) -> None:
         """Update the dupe + new-multiplier badges and tint mult exchange fields."""
         call = self._call.text().strip().upper()
         if not call:
             self._esm_sent = False  # new QSO starts unsent
         freq, mode = self._current_freq(), self._current_mode()
-        is_dupe = bool(call) and self.session.is_dupe(call, freq, mode)
-        self._dupe.setText("● style.DUPE" if is_dupe else "")
+        dupe_msg = self.session.dupe_label(call, freq, mode) if call else ""
+        is_dupe = bool(dupe_msg)
+        self._dupe.setText(dupe_msg)
+        # Hide the border/backing entirely when there's no dupe to show.
+        self._dupe.setStyleSheet(self._dupe_style() if is_dupe else "")
 
         exchange = {name: e.text().strip().upper() for name, e in self._exchange_edits.items()}
         new = self.session.new_mults(call, freq, mode, exchange) if call and not is_dupe else set()

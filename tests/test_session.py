@@ -42,6 +42,49 @@ async def test_dupe_detection_per_band_and_mode():
     assert s.is_dupe("K1ABC", FREQ_20M, Mode.CW) is True  # same slot
     assert s.is_dupe("K1ABC", FREQ_20M, Mode.USB) is False  # different mode group
     assert s.is_dupe("K1ABC", FREQ_40M, Mode.CW) is False  # different band
+    # Case-insensitive on the callsign.
+    assert s.is_dupe("k1abc", FREQ_20M, Mode.CW) is True
+    # Empty callsign is never a dupe.
+    assert s.is_dupe("", FREQ_20M, Mode.CW) is False
+
+
+async def test_dupe_phone_modes_share_a_group():
+    """All phone modes (USB/LSB/FM/AM) collapse to one Field Day slot."""
+    s = make_session()
+    await s.log_qso(
+        call="W1AW", freq_hz=FREQ_20M, mode=Mode.USB, exchange={"class": "2A", "section": "EPA"}
+    )
+    assert s.is_dupe("W1AW", FREQ_20M, Mode.LSB) is True  # both Phone
+    assert s.is_dupe("W1AW", FREQ_20M, Mode.FM) is True
+    assert s.is_dupe("W1AW", FREQ_20M, Mode.CW) is False  # CW is its own group
+
+
+async def test_dupe_digital_modes_share_a_group():
+    """FT8 and RTTY both count as Digital — a station worked on one dupes the other."""
+    s = make_session()
+    await s.log_qso(
+        call="N0CALL", freq_hz=FREQ_20M, mode=Mode.FT8, exchange={"class": "1D", "section": "CO"}
+    )
+    assert s.is_dupe("N0CALL", FREQ_20M, Mode.RTTY) is True  # both Digital
+    assert s.is_dupe("N0CALL", FREQ_20M, Mode.PSK31) is True
+    assert s.is_dupe("N0CALL", FREQ_20M, Mode.USB) is False  # Phone is distinct
+    assert s.is_dupe("N0CALL", FREQ_40M, Mode.FT8) is False  # different band
+
+
+async def test_dupe_label_message():
+    s = make_session()
+    assert s.dupe_label("K1ABC", FREQ_20M, Mode.CW) == ""
+    await s.log_qso(
+        call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "2A", "section": "EPA"}
+    )
+    assert s.dupe_label("K1ABC", FREQ_20M, Mode.CW) == "DUPE — already worked on 20m CW"
+    # Digital label reflects the mode group, not the concrete mode.
+    await s.log_qso(
+        call="K1ABC", freq_hz=FREQ_40M, mode=Mode.FT8, exchange={"class": "2A", "section": "EPA"}
+    )
+    assert s.dupe_label("K1ABC", FREQ_40M, Mode.RTTY) == "DUPE — already worked on 40m DIGITAL"
+    # Not a dupe -> empty.
+    assert s.dupe_label("K1ABC", FREQ_20M, Mode.USB) == ""
 
 
 async def test_validate_exchange():

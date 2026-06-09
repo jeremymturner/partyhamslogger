@@ -287,12 +287,31 @@ class LogSession:
     # dupe / partial check
     # ------------------------------------------------------------------ #
     def is_dupe(self, call: str, freq_hz: int, mode: Mode) -> bool:
+        """True iff logging ``call`` now (on this band+mode) would duplicate a QSO.
+
+        Uses the contest's :meth:`dupe_key`. For Field Day that is per band AND
+        per mode-group (CW / Phone / Digital), so the same call is workable again
+        on a different band, or on the same band in a different mode category.
+        """
         if not call:
             return False
         probe = QSO(
             uuid="", station_id="", operator="", call=call.upper(), freq_hz=freq_hz, mode=mode
         )
         return self.contest.dupe_key(probe) in self._dupe_keys
+
+    def dupe_label(self, call: str, freq_hz: int, mode: Mode) -> str:
+        """Human-readable dupe message, or ``""`` if it is not a dupe.
+
+        e.g. ``"DUPE — already worked on 20m CW"`` describing the slot (band +
+        mode-group) that would collide.
+        """
+        if not self.is_dupe(call, freq_hz, mode):
+            return ""
+        probe = QSO(
+            uuid="", station_id="", operator="", call=call.upper(), freq_hz=freq_hz, mode=mode
+        )
+        return f"DUPE — already worked on {probe.band_label} {probe.mode_group.value}"
 
     def new_mults(
         self, call: str, freq_hz: int, mode: Mode, exchange: dict[str, str]
