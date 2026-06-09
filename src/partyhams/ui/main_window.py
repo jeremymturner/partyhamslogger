@@ -45,6 +45,7 @@ from partyhams.core.models import (
 )
 from partyhams.export import timestamped_adif_name
 from partyhams.radio.base import Capability, RadioState
+from partyhams.refdata import RefData
 from partyhams.ui import shortcuts as sc
 from partyhams.ui import style
 from partyhams.ui.about_dialog import AboutDialog
@@ -142,6 +143,10 @@ class MainWindow(QMainWindow):
         self.on_change_autoexport: Callable[[bool, int, bool], None] | None = None
         self._sections_window: SectionsWindow | None = None
         self._cluster_window: ClusterWindow | None = None
+        # Reference data (super-check-partial, city.dat, LoTW/eQSL/QRZ user lists).
+        # Imported via Tools menu; loaded from disk on launch (missing => empty).
+        self._refdata = RefData()
+        self._refdata.load()
         #: Set by the app to no-arg callbacks that switch radio / log.
         self.on_change_radio: Callable[[], None] | None = None
         self.on_new_log: Callable[[], None] | None = None
@@ -624,6 +629,15 @@ class MainWindow(QMainWindow):
         self._build_theme_menu(self._view_menu)
         self._view_menu.addAction("Font…", self._choose_font)
 
+        tools_menu = self.menuBar().addMenu("Tools")
+        ref_menu = tools_menu.addMenu("Reference Data")
+        ref_menu.addAction("Import Super Check Partial…", self._import_scp)
+        ref_menu.addAction("Import city.dat…", self._import_city)
+        ref_menu.addSeparator()
+        ref_menu.addAction("Import LoTW users…", self._import_lotw)
+        ref_menu.addAction("Import eQSL users…", self._import_eqsl)
+        ref_menu.addAction("Import QRZ users…", self._import_qrz)
+
         help_menu = self.menuBar().addMenu("Help")
         shortcuts = help_menu.addAction("Keyboard Shortcuts…", self._show_shortcuts)
         shortcuts.setShortcut(QKeySequence(sc.SHORTCUTS))
@@ -746,6 +760,52 @@ class MainWindow(QMainWindow):
         self._cluster_window.show()
         self._cluster_window.raise_()
         self._cluster_window.activateWindow()
+
+    # ------------------------------------------------------------------ #
+    # reference data imports (Tools → Reference Data)
+    # ------------------------------------------------------------------ #
+    def _pick_refdata_file(self, title: str) -> str | None:
+        """Prompt for a reference file and return its text, or None if cancelled."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, title, "", "Reference data (*.txt *.dat *.scp *.csv);;All files (*)"
+        )
+        if not path:
+            return None
+        try:
+            return Path(path).read_text(errors="ignore")
+        except OSError as exc:
+            self.statusBar().showMessage(f"Could not read {Path(path).name}: {exc}", 4000)
+            return None
+
+    def _import_scp(self) -> None:
+        text = self._pick_refdata_file("Import Super Check Partial")
+        if text is not None:
+            count = self._refdata.import_scp(text)
+            self.statusBar().showMessage(f"Loaded {count} super-check-partial calls", 4000)
+
+    def _import_city(self) -> None:
+        text = self._pick_refdata_file("Import city.dat")
+        if text is not None:
+            count = self._refdata.import_city_dat(text)
+            self.statusBar().showMessage(f"Loaded {count} city.dat records", 4000)
+
+    def _import_lotw(self) -> None:
+        text = self._pick_refdata_file("Import LoTW users")
+        if text is not None:
+            count = self._refdata.import_lotw(text)
+            self.statusBar().showMessage(f"Loaded {count} LoTW users", 4000)
+
+    def _import_eqsl(self) -> None:
+        text = self._pick_refdata_file("Import eQSL users")
+        if text is not None:
+            count = self._refdata.import_eqsl(text)
+            self.statusBar().showMessage(f"Loaded {count} eQSL users", 4000)
+
+    def _import_qrz(self) -> None:
+        text = self._pick_refdata_file("Import QRZ users")
+        if text is not None:
+            count = self._refdata.import_qrz(text)
+            self.statusBar().showMessage(f"Loaded {count} QRZ users", 4000)
 
     def _radio_menu_clicked(self) -> None:
         if self.on_change_radio is not None:
@@ -992,10 +1052,43 @@ class MainWindow(QMainWindow):
             else:
                 edit.setStyleSheet("")
 
+        self._update_call_hint(call)
         self._update_freq_readout()
         self._update_fkey_bar()  # F-key labels follow the mode (CW vs phone)
         # Let peers see what band/mode we're on (broadcast by the presence loop).
         self.session.set_local_status(freq, mode)
+
+    def _update_call_hint(self, call: str) -> None:
+        """Tooltip on the call field: SCP partial matches + known-user flags.
+
+        Non-intrusive — only shown when reference data is loaded and matches. SCP
+        suggestions also draw from the operator's already-worked calls.
+        """
+        if not call:
+            self._call.setToolTip("")
+            return
+        lines: list[str] = []
+        worked = self.session.partial_matches(call)
+        scp = self._refdata.is_scp_match(call)
+        suggestions = sorted({*worked, *scp})[:12]
+        if suggestions:
+            lines.append("Matches: " + "  ".join(suggestions))
+        flags = []
+        if self._refdata.uses_lotw(call):
+            flags.append("LoTW")
+        if self._refdata.uses_eqsl(call):
+            flags.append("eQSL")
+        if self._refdata.qrz_known(call):
+            flags.append("QRZ")
+        if flags:
+            lines.append("Known to: " + ", ".join(flags))
+        qth = self._refdata.city_lookup(call)
+        if qth:
+            parts = [qth.get("name"), qth.get("state"), qth.get("section")]
+            label = ", ".join(p for p in parts if p)
+            if label:
+                lines.append("QTH: " + label)
+        self._call.setToolTip("\n".join(lines))
 
     def _advance_or_log(self) -> None:
         if not self._call.text().strip():
