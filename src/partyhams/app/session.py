@@ -55,6 +55,7 @@ class LogSession:
         engine.on_qso = self._on_applied
         engine.on_status = self._on_roster_change
         engine.on_chat = self._on_chat
+        engine.on_clock_off = self._on_clock_off
         # Load the persisted log into the in-memory merge, clock, and indexes.
         for qso in store.all(include_deleted=True):
             engine.log.apply(qso)
@@ -90,6 +91,15 @@ class LogSession:
     def _on_roster_change(self) -> None:
         for callback in self._roster_listeners:
             callback()
+
+    def _on_clock_off(self, operator: str, offset: float) -> None:
+        """Announce (once, debounced by the engine) that a peer's clock drifted.
+
+        Posted as a system chat to everyone so the whole network sees it. The
+        offset is *apparent* (includes network transit latency) — see
+        ``partyhams.net.clocksync`` — so the wording stays advisory.
+        """
+        self.post_chat("*", f"⏰ {operator}'s clock is off by {offset:+.1f}s — check time sync")
 
     def set_local_status(self, freq_hz: int, mode: Mode) -> None:
         """Push our current frequency/mode so peers see what we're on."""
@@ -161,6 +171,11 @@ class LogSession:
             "mode": info.get("mode", ""),
             "is_self": is_self,
             "stale": stale,
+            # Apparent clock offset vs us (seconds, peer-ahead positive) and whether
+            # it exceeds the sync threshold. None/False for self and unheard peers.
+            # NB: offset includes network latency — see partyhams.net.clocksync.
+            "clock_offset": None if is_self else info.get("clock_offset"),
+            "clock_off": (not is_self) and bool(info.get("clock_off")),
             "rates": self.station_rates(sid, now),
             "total": self.station_total(sid),
         }

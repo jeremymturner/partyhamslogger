@@ -113,11 +113,17 @@ class FullLogRequest:
 
 @dataclass
 class Heartbeat:
-    """Periodic liveness + divergence detector (``log_hash`` compares logs)."""
+    """Periodic liveness + divergence detector (``log_hash`` compares logs).
+
+    ``sender_utc`` advertises the sender's current UTC time (ISO-8601) so peers
+    can flag a station whose clock has drifted (see ``partyhams.net.clocksync``).
+    Defaults to ``""`` for back-compat with builds that predate clock-sync.
+    """
 
     count: int
     log_hash: str
     lamport_max: int
+    sender_utc: str = ""  # ISO-8601 UTC; "" => not advertised (older peer)
     type: str = "heartbeat"
 
 
@@ -200,6 +206,7 @@ def _body_to_dict(msg: Message) -> dict:
             "count": msg.count,
             "log_hash": msg.log_hash,
             "lamport_max": msg.lamport_max,
+            "sender_utc": msg.sender_utc,
         }
     if isinstance(msg, StationStatus):
         return {
@@ -236,7 +243,10 @@ def _body_from_dict(obj: dict) -> Message:
         return FullLogRequest()
     if t == "heartbeat":
         return Heartbeat(
-            count=obj["count"], log_hash=obj["log_hash"], lamport_max=obj["lamport_max"]
+            count=obj["count"],
+            log_hash=obj["log_hash"],
+            lamport_max=obj["lamport_max"],
+            sender_utc=obj.get("sender_utc", ""),
         )
     if t == "status":
         return StationStatus(

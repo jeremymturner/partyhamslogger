@@ -267,8 +267,10 @@ class NetworkPanel(QWidget):
         self._table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             rates = r["rates"]
+            clock_off = r.get("clock_off")
+            op = r["operator"] or "?"
             values = [
-                r["operator"] or "?",
+                f"⏰ {op}" if clock_off else op,  # clock-drift marker on the Op cell
                 _fmt_freq(r["freq_hz"]),
                 r["mode"] or "—",
                 str(rates[15]),
@@ -283,6 +285,13 @@ class NetworkPanel(QWidget):
                     item.setForeground(QColor(style.ACCENT))
                 elif r["stale"]:
                     item.setForeground(QColor(style.TEXT_DIM))
+                if col == 0 and clock_off:
+                    offset = r.get("clock_offset") or 0.0
+                    item.setForeground(QColor(style.AMBER))
+                    item.setToolTip(
+                        f"Clock off by {offset:+.1f}s — check time sync "
+                        "(offset includes network latency)"
+                    )
                 self._table.setItem(i, col, item)
 
         ops = self.session.operators()

@@ -21,6 +21,7 @@ from collections.abc import Callable
 
 from partyhams.core.clock import LamportClock, new_uuid
 from partyhams.core.models import QSO, Mode, utcnow
+from partyhams.net.clocksync import clock_offset_seconds, is_clock_off
 from partyhams.net.protocol import (
     Chat,
     FullLogRequest,
@@ -51,6 +52,7 @@ class SyncEngine:
         on_qso: Callable[[QSO], None] | None = None,
         on_status: Callable[[], None] | None = None,
         on_chat: Callable[[Chat, str], None] | None = None,
+        on_clock_off: Callable[[str, float], None] | None = None,
     ) -> None:
         self.transport = transport
         self.station_id = transport.station_id
@@ -65,6 +67,9 @@ class SyncEngine:
         self.on_qso = on_qso
         self.on_status = on_status  # a peer's presence/state changed
         self.on_chat = on_chat  # (Chat, sender_station_id) for an incoming message
+        # Fired (debounced) when a peer's apparent clock offset crosses the
+        # off-threshold: on_clock_off(operator_label, offset_seconds).
+        self.on_clock_off = on_clock_off
         # station_id -> operator label, for the legacy "who's on" count.
         self.peers: dict[str, str] = {}
         # station_id -> {operator, call, freq_hz, mode, last_heard} for peers.
@@ -170,6 +175,7 @@ class SyncEngine:
                 count=len(self.log),
                 log_hash=self.log.log_hash(),
                 lamport_max=self.clock.value,
+                sender_utc=utcnow().isoformat(),
             )
         )
 
@@ -281,9 +287,36 @@ class SyncEngine:
 
         elif isinstance(message, Heartbeat):
             self.clock.update(message.lamport_max)
+            self._note_clock(sender, message.sender_utc)
             # Divergence backstop: if our merged state differs, ask for the delta.
             if message.log_hash != self.log.log_hash():
                 await self.transport.send(SyncRequest(high_water=self.log.high_water()))
+
+    def _note_clock(self, sender: str, sender_utc: str) -> None:
+        """Record a peer's apparent clock offset and (debounced) flag if it's off.
+
+        The offset is the peer's advertised UTC minus our own ``utcnow()`` and is
+        stored on ``self.stations[sender]`` as ``clock_offset`` / ``clock_off`` so
+        the roster can surface it. ``on_clock_off`` is fired only on a *material*
+        transition (newly off, recovered, or the magnitude changed by >=1s) so a
+        5s heartbeat doesn't spam the same warning. See ``net.clocksync`` for the
+        latency caveat — small apparent offsets are usually transit, not drift.
+        """
+        offset = clock_offset_seconds(sender_utc, utcnow())
+        info = self.stations.get(sender)
+        if info is None:
+            return
+        prev_off = bool(info.get("clock_off"))
+        prev_offset = info.get("clock_offset")
+        off = is_clock_off(offset)
+        info["clock_offset"] = offset
+        info["clock_off"] = off
+        if offset is None or self.on_clock_off is None:
+            return
+        moved = prev_offset is None or abs(offset - prev_offset) >= 1.0
+        if off and (not prev_off or moved):
+            label = info.get("operator") or info.get("call") or sender
+            self.on_clock_off(label, offset)
 
     async def _send_diff(self, remote_high_water: dict[str, int]) -> None:
         missing = self.log.diff_since(remote_high_water)
