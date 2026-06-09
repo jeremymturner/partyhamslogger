@@ -23,8 +23,10 @@ from PySide6.QtWidgets import (
 
 from partyhams.contest import available
 from partyhams.contest import get as get_contest
+from partyhams.contest.calendar import nearest_contest_id
 from partyhams.contest.pota import is_valid_park
 from partyhams.contest.pota_api import verify_park
+from partyhams.core.models import utcnow
 from partyhams.ui.widgets import make_upper
 
 
@@ -37,6 +39,7 @@ class LogDialog(QDialog):
         self._contest = QComboBox()
         for contest_id, name in available():
             self._contest.addItem(name, contest_id)
+        self._select_default_contest()
         self._call = QLineEdit()
         self._call.setPlaceholderText("e.g. W7ABC")
         self._operator = QLineEdit()
@@ -72,6 +75,19 @@ class LogDialog(QDialog):
         self._park_status: QLabel | None = None
         self._contest.currentIndexChanged.connect(lambda _i: self._rebuild_contest_fields())
         self._rebuild_contest_fields()
+
+    def _select_default_contest(self) -> None:
+        """Default a new log to the contest nearest today's date (calendar #23).
+
+        Falls back to the combo's existing default when no nearby event maps to a
+        registered contest, so behaviour is unchanged where the calendar is silent.
+        """
+        contest_id = nearest_contest_id(utcnow())
+        if contest_id is None:
+            return
+        idx = self._contest.findData(contest_id)
+        if idx >= 0:
+            self._contest.setCurrentIndex(idx)
 
     def _rebuild_contest_fields(self) -> None:
         while self._dyn.rowCount():
