@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import socket
+import time
 from dataclasses import dataclass, field
 
 from partyhams.core.models import Band, Mode, band_for_freq
@@ -120,6 +121,53 @@ async def discover(timeout: float = 2.0, port: int = DISCOVERY_PORT) -> list[Fle
     finally:
         transport.close()
     return list(found.values())
+
+
+def discover_sync(timeout: float = 2.0, port: int = DISCOVERY_PORT) -> list[FlexRadioInfo]:
+    """Blocking discovery for callers off the asyncio loop (e.g. a Qt dialog).
+
+    Listens for FlexRadio VITA-49 broadcasts on a plain socket so it can run in a
+    worker thread without an event loop.
+    """
+    found: dict[str, FlexRadioInfo] = {}
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, "SO_REUSEPORT"):
+        with contextlib.suppress(OSError):
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    try:
+        sock.bind(("", port))
+    except OSError:
+        sock.close()
+        return []
+    sock.settimeout(0.3)
+    deadline = time.monotonic() + timeout
+    try:
+        while time.monotonic() < deadline:
+            try:
+                data, addr = sock.recvfrom(4096)
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            fields = parse_discovery(data)
+            if fields:
+                info = FlexRadioInfo.from_discovery(fields, addr[0])
+                found[info.serial or info.ip or addr[0]] = info
+    finally:
+        sock.close()
+    return list(found.values())
+
+
+def verify_connectivity(host: str, port: int = CONTROL_PORT, timeout: float = 2.0) -> bool:
+    """True if a TCP connection to the radio's control port succeeds."""
+    if not host:
+        return False
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 @register
