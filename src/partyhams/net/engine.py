@@ -23,6 +23,7 @@ from partyhams.core.clock import LamportClock, new_uuid
 from partyhams.core.models import QSO, Mode, utcnow
 from partyhams.net.protocol import (
     Chat,
+    ChatSyncResponse,
     FullLogRequest,
     Heartbeat,
     Hello,
@@ -65,6 +66,8 @@ class SyncEngine:
         self.on_qso = on_qso
         self.on_status = on_status  # a peer's presence/state changed
         self.on_chat = on_chat  # (Chat, sender_station_id) for an incoming message
+        # All chat we've seen, keyed by uuid (durable + synced like QSOs).
+        self.chats: dict[str, Chat] = {}
         # station_id -> operator label, for the legacy "who's on" count.
         self.peers: dict[str, str] = {}
         # station_id -> {operator, call, freq_hz, mode, last_heard} for peers.
@@ -195,9 +198,24 @@ class SyncEngine:
         )
 
     async def send_chat(self, to_op: str, text: str) -> Chat:
-        msg = Chat(from_op=self.operator, to_op=to_op, text=text, ts=utcnow().isoformat())
+        msg = Chat(
+            from_op=self.operator,
+            to_op=to_op,
+            text=text,
+            ts=utcnow().isoformat(),
+            uuid=new_uuid(),
+            station_id=self.station_id,
+        )
+        self.chats[msg.uuid] = msg
         await self.transport.send(msg)
         return msg
+
+    def apply_chat(self, chat: Chat) -> bool:
+        """Record a chat for sync/dedup. Returns True if it was new (by uuid)."""
+        if not chat.uuid or chat.uuid in self.chats:
+            return False
+        self.chats[chat.uuid] = chat
+        return True
 
     async def _status_loop(self) -> None:
         while self._running:
@@ -260,7 +278,9 @@ class SyncEngine:
                 self.on_status()
 
         elif isinstance(message, Chat):
-            if self.on_chat is not None:
+            # Dedup by uuid (legacy messages without a uuid always fire once).
+            is_new = message.uuid == "" or self.apply_chat(message)
+            if is_new and self.on_chat is not None:
                 self.on_chat(message, sender)
 
         elif isinstance(message, SyncRequest):
@@ -272,6 +292,14 @@ class SyncEngine:
             everything = self.log.qsos(include_deleted=True)
             if everything:
                 await self.transport.send(SyncResponse(qsos=everything))
+            # ...and all of our chat, so a (re)joiner ends up with everyone's.
+            if self.chats:
+                await self.transport.send(ChatSyncResponse(chats=list(self.chats.values())))
+
+        elif isinstance(message, ChatSyncResponse):
+            for chat in message.chats:
+                if self.apply_chat(chat) and self.on_chat is not None:
+                    self.on_chat(chat, sender)
 
         elif isinstance(message, SyncResponse):
             for qso in message.qsos:

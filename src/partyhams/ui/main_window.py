@@ -323,6 +323,9 @@ class MainWindow(QMainWindow):
         toggle.setShortcut(QKeySequence(sc.TOGGLE_NETWORK))
         self._view_menu.addAction(toggle)
 
+        # Backfill persisted/synced history (in send order) before live updates.
+        for entry in self.session.chat_messages():
+            self._panel.append_chat(entry)
         self.session.add_chat_listener(self._panel.append_chat)
         self.session.add_roster_listener(self._panel.refresh_roster)
         # Rates change with the clock, so refresh the roster on a timer too.
