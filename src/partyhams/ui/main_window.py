@@ -157,7 +157,8 @@ class MainWindow(QMainWindow):
         hbox.setSpacing(3)
 
         self._runsp_btn = QPushButton()
-        self._runsp_btn.setMinimumHeight(34)
+        self._runsp_btn.setObjectName("fkey")
+        self._runsp_btn.setMinimumHeight(46)
         self._runsp_btn.setFixedWidth(64)
         self._runsp_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._runsp_btn.clicked.connect(lambda: self._set_run(not self._run))
@@ -166,7 +167,8 @@ class MainWindow(QMainWindow):
         self._fkey_buttons: list[QPushButton] = []
         for key in range(1, 13):
             btn = QPushButton()
-            btn.setMinimumHeight(34)
+            btn.setObjectName("fkey")
+            btn.setMinimumHeight(46)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # keep focus in the call field
             btn.clicked.connect(lambda _checked=False, k=key: self._fire_macro(k))
             self._fkey_buttons.append(btn)
@@ -216,8 +218,9 @@ class MainWindow(QMainWindow):
     def _update_fkey_bar(self) -> None:
         bank = self._current_bank()
         self._runsp_btn.setText("RUN" if self._run else "S&&P")
+        # RUN stands out in amber; S&P stays dark for contrast on the cyan button.
         self._runsp_btn.setStyleSheet(
-            f"QPushButton {{ color: {AMBER if self._run else ACCENT}; font-weight: 700; }}"
+            f"QPushButton#fkey {{ color: {AMBER if self._run else '#0c1116'}; font-weight: 700; }}"
         )
         next_key = self._esm_next_key()
         for key, btn in enumerate(self._fkey_buttons, start=1):
@@ -227,7 +230,7 @@ class MainWindow(QMainWindow):
             btn.setEnabled(bool(macro and macro.content.strip()))
             # Highlight the key Enter would send next under ESM.
             if key == next_key:
-                btn.setStyleSheet(f"QPushButton {{ border: 2px solid {MULT}; }}")
+                btn.setStyleSheet(f"QPushButton#fkey {{ border: 2px solid {MULT}; }}")
             else:
                 btn.setStyleSheet("")
 

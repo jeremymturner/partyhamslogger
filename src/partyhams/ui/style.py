@@ -83,6 +83,24 @@ QPushButton:hover {{ background-color: {ACCENT_HI}; }}
 QPushButton:pressed {{ background-color: #3a8fbf; }}
 QPushButton:default {{ background-color: {ACCENT}; }}
 
+/* Function-key macro bar — two lines (Fn + macro label), so it needs
+   more vertical room and a legible disabled state for empty slots. */
+QPushButton#fkey {{
+    background-color: {ACCENT};
+    color: #0c1116;
+    border: none;
+    border-radius: 5px;
+    padding: 4px 6px;
+    font-weight: 700;
+    font-size: 12px;
+}}
+QPushButton#fkey:hover {{ background-color: {ACCENT_HI}; }}
+QPushButton#fkey:pressed {{ background-color: #3a8fbf; }}
+QPushButton#fkey:disabled {{
+    background-color: #2f5d72;  /* dimmed cyan — clearly inactive, label still legible */
+    color: #acc2cf;
+}}
+
 QTableWidget {{
     background-color: {BG_PANEL};
     alternate-background-color: #272a33;
