@@ -747,6 +747,10 @@ class MainWindow(QMainWindow):
         self._recent_menu = logs_menu.addMenu("Open Recent")
         self._recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
         logs_menu.addSeparator()
+        set_op = logs_menu.addAction("Set Operator…", self._choose_operator)
+        set_op.setShortcut(QKeySequence(sc.SET_OPERATOR))
+        set_op.setStatusTip("Set who is at the key — stamps new QSOs and colors the log")
+        logs_menu.addSeparator()
         adif = logs_menu.addAction("Export ADIF…", self._export_adif)
         adif.setShortcut(QKeySequence(sc.EXPORT_ADIF))
         cabrillo = logs_menu.addAction("Export Cabrillo…", self._export_cabrillo)
@@ -823,6 +827,23 @@ class MainWindow(QMainWindow):
         if self.on_autocq_interval is not None:
             self.on_autocq_interval(self._autocq_interval)  # app persists it
         self.statusBar().showMessage(f"Auto-CQ interval {self._autocq_interval}s", 2000)
+
+    def _choose_operator(self) -> None:
+        """Prompt for who's now at the key. New QSOs are stamped with this
+        operator and the log re-colors (white = this op, blue = others)."""
+        from PySide6.QtWidgets import QInputDialog
+
+        current = self.session.engine.operator
+        op, ok = QInputDialog.getText(
+            self, "Set Operator", "Operator callsign:", text=current
+        )
+        if not ok:
+            return
+        op = op.strip().upper()
+        if not op:
+            return
+        self.session.set_operator(op)
+        self.statusBar().showMessage(f"Operator set to {op}", 2500)
 
     def _build_wsjtx_menu(self) -> None:
         """The WSJT-X menu: toggle the UDP listener and set its server + port."""

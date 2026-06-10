@@ -23,7 +23,8 @@ from partyhams.ui import style
 # Menu/command shortcuts. These constants are imported by the main window and
 # assigned to the matching QActions.
 NEW_LOG = "Ctrl+N"
-OPEN_LOG = "Ctrl+O"
+OPEN_LOG = "Ctrl+Shift+O"
+SET_OPERATOR = "Ctrl+O"
 EXPORT_ADIF = "Ctrl+E"
 EXPORT_CABRILLO = "Ctrl+Shift+E"
 SELECT_RADIO = "Ctrl+R"
@@ -37,6 +38,7 @@ SHORTCUTS = "Ctrl+/"
 COMMANDS: list[tuple[str, str]] = [
     (NEW_LOG, "New log"),
     (OPEN_LOG, "Open log…"),
+    (SET_OPERATOR, "Set operator (who's at the key)"),
     (EXPORT_ADIF, "Export ADIF…"),
     (EXPORT_CABRILLO, "Export Cabrillo…"),
     (SELECT_RADIO, "Select radio…"),

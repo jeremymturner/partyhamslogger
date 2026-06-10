@@ -174,6 +174,12 @@ class SyncEngine:
         self._notify(qso)
         return qso
 
+    def set_operator(self, operator: str) -> None:
+        """Change who is at the key. New QSOs are stamped with this operator and
+        presence broadcasts reflect it."""
+        self.operator = operator
+        self._status["operator"] = operator
+
     def amend(self, qso: QSO) -> QSO:
         """Re-merge an existing QSO (an edit or a tombstone) under a fresh lamport.
 

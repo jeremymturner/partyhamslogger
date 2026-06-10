@@ -144,6 +144,21 @@ class LogSession:
             ft_tx_even=ft_tx_even,
         )
 
+    @property
+    def operator(self) -> str:
+        """The operator currently at the key."""
+        return self.engine.operator
+
+    def set_operator(self, operator: str) -> None:
+        """Change the current operator (persisted, so it survives a reopen) and
+        refresh listeners so the log re-colors by the new operator."""
+        op = operator.strip().upper()
+        if not op or op == self.engine.operator:
+            return
+        self.engine.set_operator(op)
+        self.store.set_meta("operator", op)
+        self._emit()
+
     def station_rates(self, station_id: str, now=None) -> dict[int, int]:
         """Cumulative QSO counts for a station within each rate window."""
         now = now or utcnow()

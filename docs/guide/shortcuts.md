@@ -11,7 +11,8 @@ matches the menus. On macOS, `Ctrl` is shown and used as `⌘`.
 | Shortcut | Action |
 | --- | --- |
 | `Ctrl+N` | New log |
-| `Ctrl+O` | Open log… |
+| `Ctrl+Shift+O` | Open log… |
+| `Ctrl+O` | Set operator (who's at the key) |
 | `Ctrl+E` | Export ADIF… |
 | `Ctrl+Shift+E` | Export Cabrillo… |
 | `Ctrl+R` | Select radio… |

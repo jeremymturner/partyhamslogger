@@ -102,6 +102,44 @@ async def test_delete_qso_tombstones_and_persists():
     assert any(x.deleted for x in s.store.all(include_deleted=True))
 
 
+async def test_set_operator_stamps_new_qsos_and_persists(tmp_path):
+    db = tmp_path / "log.sqlite"
+    from partyhams.app.session import build_session, open_session
+
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W0CPH",
+        operator="N0AW",
+        sent_exchange={"class": "1E", "section": "OR"},
+        network=None,
+        db_path=db,
+    )
+    q1 = await s.log_qso(
+        call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    assert q1.operator == "N0AW"
+
+    s.set_operator("w1xyz")  # lower-cased -> normalized
+    assert s.operator == "W1XYZ"
+    q2 = await s.log_qso(
+        call="W2ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1D", "section": "NM"}
+    )
+    assert q2.operator == "W1XYZ"  # new QSOs follow the current operator
+    assert q1.station_callsign == "W0CPH"  # station call unchanged
+
+    # Persisted to the log's meta, so a reopen restores the latest operator.
+    s.store.close()
+    assert open_session(db).operator == "W1XYZ"
+
+
+async def test_set_operator_ignores_blank_and_noop():
+    s = make_session()
+    before = s.operator
+    s.set_operator("")  # blank -> ignored
+    s.set_operator(before)  # same -> no-op
+    assert s.operator == before
+
+
 async def test_dupe_label_message():
     s = make_session()
     assert s.dupe_label("K1ABC", FREQ_20M, Mode.CW) == ""
