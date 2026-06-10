@@ -191,6 +191,30 @@ async def test_log_rows_colored_by_operator_not_station_id():
     assert again["K1ABC"] != peer_color  # still white after the station_id change
 
 
+def test_theme_menu_has_nonselectable_dark_light_headers():
+    from PySide6.QtWidgets import QMenu
+
+    w = _window()
+    theme_menu = next(m for m in w.menuBar().findChildren(QMenu) if m.title() == "Theme")
+    headers = [
+        a.text() for a in theme_menu.actions() if not a.isSeparator() and not a.isEnabled()
+    ]
+    assert headers == ["Dark Themes", "Light Themes"]
+    # Headers are not checkable theme choices.
+    for a in theme_menu.actions():
+        if a.text() in ("Dark Themes", "Light Themes"):
+            assert not a.isCheckable() and not a.isEnabled()
+    # The dark header comes before any selectable theme; the light header divides.
+    texts = [
+        ("HEADER", a.text()) if not a.isEnabled() and not a.isSeparator() else ("ITEM", a.text())
+        for a in theme_menu.actions()
+        if not a.isSeparator()
+    ]
+    assert texts[0] == ("HEADER", "Dark Themes")
+    light_idx = texts.index(("HEADER", "Light Themes"))
+    assert all(kind == "ITEM" for kind, _ in texts[1:light_idx])  # only themes between headers
+
+
 def test_fkey_bar_only_visible_for_cw_and_ssb():
     w = _window()
     for mode in (Mode.CW, Mode.USB, Mode.LSB):

@@ -1068,10 +1068,14 @@ class MainWindow(QMainWindow):
         theme_menu = view_menu.addMenu("Theme")
         group = QActionGroup(self)
         group.setExclusive(True)
-        last_dark = True
+        last_dark = None
         for name, dark in style.theme_names():
             if dark != last_dark:
-                theme_menu.addSeparator()  # divide dark from light themes
+                # Non-selectable header dividing the dark themes from the light.
+                if last_dark is not None:
+                    theme_menu.addSeparator()
+                header = theme_menu.addAction("Dark Themes" if dark else "Light Themes")
+                header.setEnabled(False)
                 last_dark = dark
             action = theme_menu.addAction(name)
             action.setCheckable(True)
