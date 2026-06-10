@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -1348,7 +1349,9 @@ class MainWindow(QMainWindow):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setAlternatingRowColors(True)
         self._table.setShowGrid(False)
-        self._table.horizontalHeader().setStretchLastSection(True)
+        # Share width across all columns instead of dumping the slack into the last
+        # one (which made "Op" enormous). Stretch divides space evenly.
+        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         # Right-click to delete, double-click to edit. _row_qsos maps rows -> QSO.
         self._row_qsos: list[QSO] = []
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
