@@ -1594,6 +1594,8 @@ class MainWindow(QMainWindow):
         operator = self.session.engine.operator
         name = self.session.contest.name
         mult_label = self.session.contest.mult_label
+        mult_total = self.session.contest.mult_total
+        mult_txt = f"{s.mult_count}/{mult_total}" if mult_total else f"{s.mult_count}"
         op_txt = (
             f" <span style='color:{style.TEXT_DIM}'>op</span> {operator}"
             if operator and operator != call
@@ -1604,8 +1606,7 @@ class MainWindow(QMainWindow):
             f"<b style='color:{style.ACCENT}'>{call}</b>{op_txt} &nbsp;·&nbsp; {name} "
             f"&nbsp;|&nbsp; "
             f"QSOs <b style='color:{style.TEXT}'>{s.qso_count}</b> &nbsp; "
-            f"{mult_label} <b style='color:{style.MULT}'>{s.mult_count}</b> &nbsp; "
-            f"Score <b style='color:{style.AMBER}'>{s.total}</b>{peer_txt}"
+            f"{mult_label} <b style='color:{style.MULT}'>{mult_txt}</b>{peer_txt}"
         )
 
     def _reload_table(self) -> None:

@@ -26,6 +26,13 @@ def test_registered():
     assert get("arrl-field-day").name == "ARRL Field Day"
 
 
+def test_mult_total_is_section_count_excluding_dx():
+    fd = get("arrl-field-day")
+    assert fd.mult_label == "Sections"
+    assert fd.mult_total == len(ARRL_SECTIONS - {"DX"})  # the ARRL/RAC sections, no DX
+    assert "DX" in ARRL_SECTIONS and fd.mult_total == len(ARRL_SECTIONS) - 1
+
+
 def test_class_and_section_validation():
     assert is_valid_class("3A")
     assert is_valid_class("1E")

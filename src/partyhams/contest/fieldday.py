@@ -29,7 +29,7 @@ from partyhams.contest.base import (
     _macros,
 )
 from partyhams.contest.registry import register
-from partyhams.contest.sections import is_valid_section
+from partyhams.contest.sections import ARRL_SECTIONS, is_valid_section
 from partyhams.core.models import QSO, ModeGroup
 
 # Class = number of transmitters (1+) followed by a category letter A–F.
@@ -87,6 +87,7 @@ class FieldDay(ContestDefinition):
     cabrillo_name = "ARRL-FD"
     exchanges_rst = False  # Field Day exchange is class + section only — no RST
     mult_label = "Sections"
+    mult_total = len(ARRL_SECTIONS - {"DX"})  # the 85 ARRL/RAC sections (DX excluded)
 
     def default_macros(self) -> dict[str, list[Macro]]:
         # Modeled on N1MM's Field Day messages (FD exchange = class + section, no

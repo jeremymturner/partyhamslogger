@@ -94,6 +94,8 @@ class ContestDefinition(ABC):
     exchanges_rst: bool = True
     #: UI label for this contest's multipliers (e.g. "Zones", "Sections").
     mult_label: str = "Mults"
+    #: Total possible multipliers, for a "worked / total" display (None = unknown).
+    mult_total: int | None = None
 
     # --- F-key macros ---
     def default_macros(self) -> dict[str, list[Macro]]:
