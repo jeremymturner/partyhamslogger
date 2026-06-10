@@ -222,6 +222,12 @@ class MainWindow(QMainWindow):
             self._columns += ["RST S", "RST R"]
         self._columns += ["Exchange", "Op"]
 
+        # Frequency readout (live from CAT when a radio is connected). Lives in the
+        # status bar; created here because building the entry row triggers an early
+        # _update_freq_readout (the band combo's default-index change).
+        self._freq = QLabel()
+        self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
+
         self._build_menu()
         root = QWidget()
         layout = QVBoxLayout(root)
@@ -244,6 +250,9 @@ class MainWindow(QMainWindow):
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
         )
         self._radio_status_label.setMinimumWidth(240)
+        # Frequency readout sits just left of the radio indicator (added first so it
+        # lands to the left in the status bar's right-aligned permanent area).
+        self.statusBar().addPermanentWidget(self._freq)
         self.statusBar().addPermanentWidget(self._radio_status_label)
         self.statusBar().setSizeGripEnabled(False)
 
@@ -1034,8 +1043,7 @@ class MainWindow(QMainWindow):
 
     def restyle(self) -> None:
         """Re-apply palette-derived inline styles after a live theme change."""
-        self._mult.setStyleSheet(f"font-weight: bold; color: {style.MULT};")
-        # The dupe banner's style is re-applied (palette-aware) by refresh() below.
+        # The shared dupe/mult badge is re-styled (palette-aware) by refresh() below.
         self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
         self._update_fkey_bar()
         self._update_radio_label()
@@ -1248,23 +1256,12 @@ class MainWindow(QMainWindow):
         self._esm_badge.setVisible(self._esm)
         hbox.addWidget(self._esm_badge)
 
-        # Frequency readout (live from CAT when a radio is connected). Fixed width
-        # so its content changing doesn't shift the row.
-        self._freq = QLabel()
-        self._freq.setFixedWidth(140)
-        self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
-        hbox.addWidget(self._freq)
-
-        # Status indicators: new-multiplier (green) and dupe (red). Both reserve a
-        # fixed width so showing/hiding a badge never squishes the entry fields.
-        self._mult = QLabel()
-        self._mult.setFixedWidth(110)
-        self._mult.setStyleSheet(f"font-weight: bold; color: {style.MULT};")
-        hbox.addWidget(self._mult)
-        self._dupe = QLabel()
-        self._dupe.setMinimumWidth(260)
-        self._dupe.setStyleSheet(self._dupe_style())
-        hbox.addWidget(self._dupe)
+        # One status badge, shared by the dupe (red) and new-multiplier (green)
+        # indicators — only one applies at a time, so they occupy the same space and
+        # just swap text + color. Min width so toggling never squishes the fields.
+        self._status_badge = QLabel()
+        self._status_badge.setMinimumWidth(220)
+        hbox.addWidget(self._status_badge)
 
         hbox.addStretch(1)
         return row
@@ -1352,29 +1349,37 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # entry behavior
     # ------------------------------------------------------------------ #
-    def _dupe_style(self) -> str:
-        """Inline style for the dupe banner: bold red text on a tinted backing."""
+    def _badge_style(self, color: str) -> str:
+        """Inline style for the shared status badge: bold colored text on a tinted,
+        bordered backing (red for dupes, green for new multipliers)."""
         return (
-            f"font-weight: bold; color: {style.DUPE}; "
-            f"border: 1px solid {style.DUPE}; border-radius: 3px; padding: 2px 6px;"
+            f"font-weight: bold; color: {color}; "
+            f"border: 1px solid {color}; border-radius: 3px; padding: 2px 6px;"
         )
 
     def _refresh_indicators(self) -> None:
-        """Update the dupe + new-multiplier badges and tint mult exchange fields."""
+        """Update the shared dupe/new-multiplier badge and tint mult exchange fields."""
         call = self._call.text().strip().upper()
         if not call:
             self._esm_sent = False  # new QSO starts unsent
         freq, mode = self._current_freq(), self._current_mode()
         dupe_msg = self.session.dupe_label(call, freq, mode) if call else ""
         is_dupe = bool(dupe_msg)
-        self._dupe.setText(dupe_msg)
-        # Hide the border/backing entirely when there's no dupe to show.
-        self._dupe.setStyleSheet(self._dupe_style() if is_dupe else "")
 
         exchange = {name: e.text().strip().upper() for name, e in self._exchange_edits.items()}
         new = self.session.new_mults(call, freq, mode, exchange) if call and not is_dupe else set()
         new_types = {mtype for mtype, _ in new}
-        self._mult.setText("★ NEW " + "/".join(sorted(t.upper() for t in new_types)) if new else "")
+
+        # Dupe (red) wins over a new multiplier (green); they share one badge.
+        if is_dupe:
+            self._status_badge.setText(dupe_msg)
+            self._status_badge.setStyleSheet(self._badge_style(style.DUPE))
+        elif new:
+            self._status_badge.setText("★ NEW " + "/".join(sorted(t.upper() for t in new_types)))
+            self._status_badge.setStyleSheet(self._badge_style(style.MULT))
+        else:
+            self._status_badge.setText("")
+            self._status_badge.setStyleSheet("")
         # Tint the exchange field(s) that carry a new multiplier.
         for field in self.session.contest.exchange_fields():
             edit = self._exchange_edits[field.name]
