@@ -92,7 +92,9 @@ package: $(PKG_STAMP) ## Build a standalone app for THIS OS (-> dist/)
 
 .PHONY: package-mac-universal
 package-mac-universal: $(PKG_STAMP) ## macOS universal2 .app (Intel + Apple Silicon)
-	@$(PY) -m PyInstaller --noconfirm --clean --target-arch universal2 packaging/partyhams.spec
+	@$(PY) -c "import os,sys,subprocess as s; p=os.path.realpath(sys.executable); a=set(s.run(['lipo','-archs',p],capture_output=True,text=True).stdout.split()); ok={'arm64','x86_64'}<=a; sys.stderr.write('' if ok else 'ERROR: this Python (%s) is %s-only; universal2 needs a universal2 interpreter (use the python.org installer) — see docs/PACKAGING.md\n'%(p,'+'.join(sorted(a)) or 'unknown')); sys.exit(0 if ok else 1)"
+	@PYI_TARGET_ARCH=universal2 $(PY) -m PyInstaller --noconfirm --clean packaging/partyhams.spec
+	@echo ">> built dist/PartyHamsLogger.app (universal2)"
 
 .PHONY: package-appimage
 package-appimage: package ## Linux AppImage (needs linuxdeploy + appimagetool)

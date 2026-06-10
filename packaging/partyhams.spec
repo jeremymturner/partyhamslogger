@@ -61,6 +61,11 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)  # noqa: F821
 
+# Target architecture: PyInstaller forbids --target-arch on the command line when
+# a .spec is used, so we read it from the environment instead (set by the Makefile
+# `package-mac-universal` target). None => build for the host architecture.
+target_arch = os.environ.get("PYI_TARGET_ARCH") or None
+
 exe = EXE(  # noqa: F821
     pyz,
     a.scripts,
@@ -68,6 +73,7 @@ exe = EXE(  # noqa: F821
     exclude_binaries=True,
     name=APP_NAME,
     console=False,  # GUI app — no console window on Windows
+    target_arch=target_arch,
     icon=icon_file,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name=APP_NAME)  # noqa: F821
