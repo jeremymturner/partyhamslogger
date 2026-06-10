@@ -346,6 +346,8 @@ def test_qso_logged_to_record_mapping():
     assert kwargs["exchange"]["exchange"] == "2A WWA"
     assert kwargs["rst_sent"] == "-10"
     assert kwargs["rst_rcvd"] == "-12"
+    # WSJT-X's reported QSO-off time becomes the log timestamp.
+    assert kwargs["timestamp"] == datetime(2026, 6, 7, 18, 30, 15, tzinfo=UTC)
 
 
 def test_qso_logged_to_record_defaults_when_blank():
@@ -356,6 +358,8 @@ def test_qso_logged_to_record_defaults_when_blank():
     assert kwargs["exchange"] == {}
     assert kwargs["rst_sent"] is None
     assert kwargs["rst_rcvd"] == "599"
+    # No WSJT-X time supplied -> no timestamp override (record_qso stamps "now").
+    assert "timestamp" not in kwargs
 
 
 def _session():
@@ -376,6 +380,7 @@ def test_conversion_feeds_session():
     assert qso.call == "K1ABC"
     assert qso.freq_hz == 14_074_000
     assert qso.mode == Mode.FT8
+    assert qso.timestamp == datetime(2026, 6, 7, 18, 30, 15, tzinfo=UTC)
     assert qso in session.qsos()
 
 

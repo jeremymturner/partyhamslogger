@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import datetime
 
 from partyhams.core.clock import LamportClock, new_uuid
 from partyhams.core.models import QSO, Mode, utcnow
@@ -145,12 +146,15 @@ class SyncEngine:
         exchange_rcvd: dict[str, str] | None = None,
         rst_sent: str = "599",
         rst_rcvd: str = "599",
+        timestamp: datetime | None = None,
     ) -> QSO:
         """Create + store a new QSO locally (synchronous, no network).
 
         Returns immediately so the UI updates instantly; broadcast the result with
-        :meth:`broadcast` as a separate, best-effort step.
+        :meth:`broadcast` as a separate, best-effort step. ``timestamp`` overrides
+        the default "now" (e.g. WSJT-X reports the QSO's actual completion time).
         """
+        when = {} if timestamp is None else {"timestamp": timestamp}
         qso = QSO(
             uuid=new_uuid(),
             station_id=self.station_id,
@@ -162,6 +166,7 @@ class SyncEngine:
             rst_sent=rst_sent,
             rst_rcvd=rst_rcvd,
             exchange_rcvd=exchange_rcvd or {},
+            **when,
         )
         self.log.apply(qso)
         self._notify(qso)

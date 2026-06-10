@@ -72,6 +72,7 @@ From WSJT-X's `QSOLogged` message PartyHams records:
 | WSJT-X field      | PartyHams                          |
 | ----------------- | ---------------------------------- |
 | DX Call           | Call                               |
+| Date & Time Off   | QSO timestamp (the contact's real time, not packet arrival) |
 | Tx Frequency (Hz) | Frequency → band                   |
 | Mode              | Mode (FT8/FT4 → DIGITAL group; other data sub-modes map to FT8) |
 | Report Sent/Recv  | RST sent / received                |

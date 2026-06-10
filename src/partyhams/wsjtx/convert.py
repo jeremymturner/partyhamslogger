@@ -101,7 +101,7 @@ def qso_logged_to_record(msg: QSOLogged) -> dict[str, object]:
         exchange["grid"] = msg.dx_grid.strip().upper()
     if msg.exchange_recv:
         exchange["exchange"] = msg.exchange_recv.strip()
-    return {
+    record: dict[str, object] = {
         "call": msg.dx_call.strip().upper(),
         "freq_hz": int(msg.tx_frequency),
         "mode": map_mode(msg.mode),
@@ -109,3 +109,9 @@ def qso_logged_to_record(msg: QSOLogged) -> dict[str, object]:
         "rst_sent": msg.report_sent.strip() or None,
         "rst_rcvd": msg.report_recv.strip() or "599",
     }
+    # Use WSJT-X's reported QSO time (off, else on) so the log shows when the
+    # contact actually happened, not when our listener received the packet.
+    when = msg.date_time_off or msg.date_time_on
+    if when is not None:
+        record["timestamp"] = when
+    return record

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 from partyhams.contest import get as get_contest
@@ -331,17 +332,25 @@ class LogSession:
         exchange: dict[str, str],
         rst_sent: str | None = None,
         rst_rcvd: str = "599",
+        timestamp: datetime | None = None,
     ) -> QSO:
         """Log a QSO locally and synchronously (UI updates immediately).
 
         Returns the recorded QSO; broadcast it to peers with :meth:`broadcast`.
+        ``timestamp`` overrides "now" (WSJT-X reports the QSO's actual time).
         """
         if self.contest.exchanges_rst:
             rs, rr = rst_sent or default_rst(mode), rst_rcvd
         else:
             rs = rr = ""  # contests like Field Day exchange no signal report
         return self.engine.record(
-            call=call, freq_hz=freq_hz, mode=mode, exchange_rcvd=exchange, rst_sent=rs, rst_rcvd=rr
+            call=call,
+            freq_hz=freq_hz,
+            mode=mode,
+            exchange_rcvd=exchange,
+            rst_sent=rs,
+            rst_rcvd=rr,
+            timestamp=timestamp,
         )
 
     async def broadcast(self, qso: QSO) -> None:
