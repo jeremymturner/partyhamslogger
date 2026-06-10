@@ -8,8 +8,31 @@ exchange / reports); the session then stamps identity + merge metadata.
 
 from __future__ import annotations
 
+import uuid as _uuid
+
 from partyhams.core.models import Mode
 from partyhams.wsjtx.protocol import QSOLogged
+
+# Fixed namespace for deriving a stable QSO uuid from a WSJT-X logged contact, so
+# a duplicated UDP delivery (WSJT-X sends one copy per "Outgoing interface", and
+# multicast can re-deliver) maps to the SAME uuid and is deduped, not re-logged.
+_WSJTX_NS = _uuid.UUID("9f1d2c3a-6b7e-4f80-9a11-7e1c0d2b3a45")
+
+
+def stable_uuid(msg: QSOLogged) -> str:
+    """A content-derived uuid for a WSJT-X logged QSO — identical across duplicate
+    deliveries of the same contact, distinct across operators/contacts."""
+    when = msg.date_time_off or msg.date_time_on
+    key = "|".join(
+        [
+            (msg.operator_call or msg.my_call or "").strip().upper(),
+            msg.dx_call.strip().upper(),
+            str(int(msg.tx_frequency)),
+            msg.mode.strip().upper(),
+            when.isoformat() if when else "",
+        ]
+    )
+    return str(_uuid.uuid5(_WSJTX_NS, key))
 
 # WSJT-X mode strings -> our concrete Mode. WSJT-X reports many digital
 # sub-modes (FT8, FT4, JT9, MSK144, ...); anything not FT4 maps to FT8's
@@ -108,6 +131,8 @@ def qso_logged_to_record(msg: QSOLogged) -> dict[str, object]:
         "exchange": exchange,
         "rst_sent": msg.report_sent.strip() or None,
         "rst_rcvd": msg.report_recv.strip() or "599",
+        # Content-derived id => duplicate UDP deliveries dedupe instead of stacking.
+        "uuid": stable_uuid(msg),
     }
     # Use WSJT-X's reported QSO time (off, else on) so the log shows when the
     # contact actually happened, not when our listener received the packet.

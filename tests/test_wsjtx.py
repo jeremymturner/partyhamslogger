@@ -384,6 +384,38 @@ def test_conversion_feeds_session():
     assert qso in session.qsos()
 
 
+def test_stable_uuid_is_deterministic_and_specific():
+    from partyhams.wsjtx.convert import stable_uuid
+
+    base = QSOLogged(
+        id="X",
+        dx_call="K1ABC",
+        tx_frequency=14_074_000,
+        mode="FT8",
+        date_time_off=datetime(2026, 6, 7, 18, 30, 15, tzinfo=UTC),
+        my_call="W0CPH",
+        operator_call="N0AW",
+    )
+    # Same contact -> same uuid (so duplicate packets dedupe).
+    assert stable_uuid(base) == stable_uuid(base)
+    # A different band, call, or operator -> a different uuid.
+    from dataclasses import replace
+
+    assert stable_uuid(base) != stable_uuid(replace(base, tx_frequency=7_074_000))
+    assert stable_uuid(base) != stable_uuid(replace(base, dx_call="W2XYZ"))
+    assert stable_uuid(base) != stable_uuid(replace(base, operator_call="W1AW"))
+
+
+def test_duplicate_wsjtx_deliveries_dedupe_in_the_log():
+    """Re-delivering the same QSOLogged (multi-interface / multicast) logs once."""
+    session = _session()
+    msg = parse_message(_qso_logged_bytes())
+    kwargs = qso_logged_to_record(msg)
+    for _ in range(6):
+        session.record_qso(**kwargs)  # same content-derived uuid each time
+    assert len(session.qsos()) == 1
+
+
 # --------------------------------------------------------------------------- #
 # listener over loopback UDP
 # --------------------------------------------------------------------------- #

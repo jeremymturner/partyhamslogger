@@ -1023,10 +1023,16 @@ class MainWindow(QMainWindow):
 
     # --- WSJT-X message handlers (called from the asyncio thread) ---
     def _on_wsjtx_qso(self, msg: QSOLogged) -> None:
-        """Log a WSJT-X-reported QSO into our log (dedup handled by the engine)."""
+        """Log a WSJT-X-reported QSO into our log. The record carries a content-
+        derived uuid, so a duplicated UDP delivery (WSJT-X sends one copy per
+        outgoing interface, and multicast can re-deliver) is deduped here rather
+        than stacking up as repeated entries."""
         kwargs = qso_logged_to_record(msg)
         if not kwargs["call"]:
             return
+        existing = self.session.engine.log.get(str(kwargs["uuid"]))
+        if existing is not None and not existing.deleted:
+            return  # already logged this exact contact — a duplicate packet
         try:
             qso = self.session.record_qso(**kwargs)  # type: ignore[arg-type]
         except Exception as exc:  # noqa: BLE001 - never let a peer packet crash us

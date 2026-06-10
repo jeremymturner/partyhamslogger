@@ -358,11 +358,14 @@ class LogSession:
         rst_sent: str | None = None,
         rst_rcvd: str = "599",
         timestamp: datetime | None = None,
+        uuid: str | None = None,
     ) -> QSO:
         """Log a QSO locally and synchronously (UI updates immediately).
 
         Returns the recorded QSO; broadcast it to peers with :meth:`broadcast`.
         ``timestamp`` overrides "now" (WSJT-X reports the QSO's actual time).
+        ``uuid`` overrides the random id (a content-derived id makes a re-delivered
+        source — e.g. a duplicated WSJT-X packet — idempotent).
         """
         if self.contest.exchanges_rst:
             rs, rr = rst_sent or default_rst(mode), rst_rcvd
@@ -376,6 +379,7 @@ class LogSession:
             rst_sent=rs,
             rst_rcvd=rr,
             timestamp=timestamp,
+            uuid=uuid,
         )
 
     def delete_qso(self, qso: QSO) -> QSO:

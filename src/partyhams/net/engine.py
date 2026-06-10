@@ -148,16 +148,19 @@ class SyncEngine:
         rst_sent: str = "599",
         rst_rcvd: str = "599",
         timestamp: datetime | None = None,
+        uuid: str | None = None,
     ) -> QSO:
         """Create + store a new QSO locally (synchronous, no network).
 
         Returns immediately so the UI updates instantly; broadcast the result with
         :meth:`broadcast` as a separate, best-effort step. ``timestamp`` overrides
         the default "now" (e.g. WSJT-X reports the QSO's actual completion time).
+        ``uuid`` overrides the random id — pass a content-derived one to make a
+        re-delivered source (e.g. a duplicated WSJT-X UDP packet) idempotent.
         """
         when = {} if timestamp is None else {"timestamp": timestamp}
         qso = QSO(
-            uuid=new_uuid(),
+            uuid=uuid or new_uuid(),
             station_id=self.station_id,
             operator=self.operator,
             station_callsign=self.call,
