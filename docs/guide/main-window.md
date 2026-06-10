@@ -24,8 +24,9 @@ Enter logs the QSO.
   apply); in data modes (RTTY, FT8/FT4) and FM/AM the bar is hidden, and when
   WSJT-X is driving a data mode it is replaced by the [WSJT-X panel](wsjtx.md).
 - **Status bar** — transmit indicator on the left; on the right the live
-  readout (frequency, band, and — with a CAT radio — mode) and the connected
-  radio (or "No radio (manual)"), plus transient messages.
+  readout (frequency, band, and — with a CAT radio — mode), the WSJT-X transmit
+  period (EVEN/ODD) while WSJT-X drives a data mode, and the connected radio (or
+  "No radio (manual)"), plus transient messages.
 - **Network dock** — the [Network panel](network-panel.md) docks on the right.
 
 ## Keyboard flow

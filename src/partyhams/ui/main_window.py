@@ -236,6 +236,9 @@ class MainWindow(QMainWindow):
         # _update_freq_readout (the band combo's default-index change).
         self._freq = QLabel()
         self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
+        # WSJT-X transmit period (EVEN/ODD), shown just right of the FT8/FT4 mode.
+        self._tx_period = QLabel()
+        self._tx_period.setStyleSheet(f"color: {style.AMBER}; font-weight: 600;")
 
         self._build_menu()
         root = QWidget()
@@ -259,9 +262,10 @@ class MainWindow(QMainWindow):
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
         )
         self._radio_status_label.setMinimumWidth(240)
-        # Frequency readout sits just left of the radio indicator (added first so it
-        # lands to the left in the status bar's right-aligned permanent area).
+        # Left-to-right in the right-aligned permanent area: frequency/band/mode,
+        # then the WSJT-X EVEN/ODD period, then the radio indicator.
         self.statusBar().addPermanentWidget(self._freq)
+        self.statusBar().addPermanentWidget(self._tx_period)
         self.statusBar().addPermanentWidget(self._radio_status_label)
         self.statusBar().setSizeGripEnabled(False)
 
@@ -1013,6 +1017,8 @@ class MainWindow(QMainWindow):
             ft_tx_even = 0 if status.tx_period_odd else 1
         else:
             ft_tx_even = tx_even_from_epoch(utcnow().timestamp(), status.mode)
+        # Show the period (EVEN/ODD) in the status bar, just right of the FT8/FT4 mode.
+        self._tx_period.setText({1: "EVEN", 0: "ODD"}.get(ft_tx_even, ""))
         self.session.set_local_status(
             status.dial_freq, self._map_status_mode(status.mode), ft_tx_even=ft_tx_even
         )
@@ -1036,6 +1042,7 @@ class MainWindow(QMainWindow):
         self._update_bottom_bars()
         if not active:
             self._wsjtx_panel.clear_decodes()
+            self._tx_period.setText("")  # no EVEN/ODD when WSJT-X isn't driving
 
     def _update_bottom_bars(self) -> None:
         """Decide what fills the slot below the log. The F-key macro bar shows only

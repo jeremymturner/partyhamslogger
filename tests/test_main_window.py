@@ -375,6 +375,20 @@ def test_wsjtx_status_sets_entry_mode_and_swaps_panel():
     assert not w._wsjtx_panel.isHidden()
 
 
+def test_wsjtx_tx_period_shown_in_status_bar():
+    w = _window()
+    assert w._tx_period.text() == ""  # nothing until WSJT-X is driving a data mode
+
+    w._on_wsjtx_status(Status(id="W", mode="FT4", dial_freq=7_047_500, tx_period_odd=True))
+    assert w._tx_period.text() == "ODD"
+    w._on_wsjtx_status(Status(id="W", mode="FT8", dial_freq=14_074_000, tx_period_odd=False))
+    assert w._tx_period.text() == "EVEN"
+
+    # Dropping out of a data mode clears it.
+    w._on_wsjtx_status(Status(id="W", mode="USB", dial_freq=14_200_000))
+    assert w._tx_period.text() == ""
+
+
 def test_wsjtx_submode_overrides_rig_data_mode():
     # A CAT rig only knows "data/USB" (read back as FT8); WSJT-X knows FT8 vs FT4.
     # While WSJT-X is active its sub-mode must win — even when the rig keeps
