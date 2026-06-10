@@ -86,3 +86,25 @@ def test_wsjtx_status_sets_entry_mode_and_swaps_panel():
     w._on_wsjtx_status(Status(id="WSJT", mode="FT8", dial_freq=14_074_000))
     assert w._mode.currentData() == Mode.FT8
     assert not w._wsjtx_panel.isHidden()
+
+
+def test_wsjtx_submode_overrides_rig_data_mode():
+    # A CAT rig only knows "data/USB" (read back as FT8); WSJT-X knows FT8 vs FT4.
+    # While WSJT-X is active its sub-mode must win — even when the rig keeps
+    # re-reporting its coarse FT8 data mode.
+    w = _window()
+    w.set_poller(_fake_poller(7_074_000, Mode.FT8))  # rig in a data mode
+    assert w._current_mode() == Mode.FT8
+
+    w._on_wsjtx_status(Status(id="WSJT", mode="FT4", dial_freq=7_047_500))
+    assert w._current_mode() == Mode.FT4
+    assert w._freq.text().rstrip().endswith("FT4")
+
+    # A later rig poll still says FT8 — it must not clobber the WSJT-X sub-mode.
+    w._apply_radio_state(RadioState(freq_hz=7_047_500, mode=Mode.FT8))
+    assert w._current_mode() == Mode.FT4
+
+    # When WSJT-X drops out of a data mode, fall back to the rig's mode.
+    w._on_wsjtx_status(Status(id="WSJT", mode="USB", dial_freq=14_200_000))
+    assert w._wsjtx_mode is None
+    assert w._current_mode() == Mode.FT8  # back to the rig's data mode

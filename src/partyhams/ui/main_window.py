@@ -196,6 +196,9 @@ class MainWindow(QMainWindow):
         self._wsjtx_enabled = False
         self._wsjtx_port = 2237
         self._wsjtx_active = False
+        # The exact data sub-mode WSJT-X reports (FT8 vs FT4). A CAT rig only knows
+        # "data/USB" (read back as FT8), so while WSJT-X is active its mode wins.
+        self._wsjtx_mode: Mode | None = None
         self._wsjtx_id = ""  # the reporting WSJT-X instance id (for replies)
         self._wsjtx_highlighted: set[str] = set()  # calls we've already colored
         #: Set by the app: on_change_wsjtx(enabled, port) persists the choice.
@@ -907,12 +910,16 @@ class MainWindow(QMainWindow):
         group = mode_group_for(mapped)
         active = group.value == "DIGITAL"
         self._set_wsjtx_active(active)
+        # WSJT-X's sub-mode (FT8/FT4) overrides the rig's coarse data mode while active.
+        self._wsjtx_mode = mapped if active else None
         if not active:
+            self._update_freq_readout()  # drop the FT8/FT4 label from the status bar
             return
         # Reflect WSJT-X's actual data mode (FT8 vs FT4) in the entry mode field.
         mode_idx = self._mode.findData(mapped)
         if mode_idx >= 0:
             self._mode.setCurrentIndex(mode_idx)
+        self._update_freq_readout()  # status bar mode follows WSJT-X under CAT
         sending = status.tx_mode or status.mode
         if status.dx_call:
             sending = f"{status.dx_call} ({sending})"
@@ -1315,6 +1322,10 @@ class MainWindow(QMainWindow):
         return (band.low_hz + band.high_hz) // 2
 
     def _current_mode(self) -> Mode:
+        # WSJT-X knows the exact sub-mode (FT8 vs FT4); a CAT rig only reports a
+        # coarse data mode, so WSJT-X wins whenever it's driving a data mode.
+        if self._wsjtx_active and self._wsjtx_mode is not None:
+            return self._wsjtx_mode
         if self._cat and self._radio_mode is not None:
             return self._radio_mode
         return self._mode.currentData()
