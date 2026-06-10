@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -352,6 +353,43 @@ class LogSession:
             rst_rcvd=rr,
             timestamp=timestamp,
         )
+
+    def delete_qso(self, qso: QSO) -> QSO:
+        """Tombstone a QSO (locally + CRDT). Returns the tombstone; broadcast it
+        with :meth:`broadcast` so peers drop it too."""
+        return self.engine.amend(replace(qso, deleted=True))
+
+    def update_qso(
+        self,
+        qso: QSO,
+        *,
+        call: str,
+        freq_hz: int,
+        mode: Mode,
+        exchange: dict[str, str],
+        rst_sent: str | None = None,
+        rst_rcvd: str | None = None,
+        timestamp: datetime | None = None,
+    ) -> QSO:
+        """Edit a QSO's details in place (same uuid, fresh lamport). Returns the
+        amended QSO; broadcast it with :meth:`broadcast`."""
+        if self.contest.exchanges_rst:
+            rs = rst_sent if rst_sent is not None else qso.rst_sent
+            rr = rst_rcvd if rst_rcvd is not None else qso.rst_rcvd
+        else:
+            rs = rr = ""
+        amended = replace(
+            qso,
+            call=call.upper(),
+            freq_hz=freq_hz,
+            mode=mode,
+            exchange_rcvd=exchange,
+            rst_sent=rs,
+            rst_rcvd=rr,
+            timestamp=timestamp or qso.timestamp,
+            deleted=False,
+        )
+        return self.engine.amend(amended)
 
     async def broadcast(self, qso: QSO) -> None:
         await self.engine.broadcast(qso)

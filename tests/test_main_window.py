@@ -77,6 +77,47 @@ async def test_dupe_filters_log_to_that_call_and_clears():
     assert _table_calls(w) == ["K1ABC", "W2XYZ", "K1ABC"]
 
 
+async def test_edit_qso_dialog_prefills_and_preserves_freq():
+    from partyhams.ui.qso_dialog import QsoEditDialog
+
+    w = _window()
+    s = w.session
+    q = await s.log_qso(
+        call="K1ABC", freq_hz=14_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    w.refresh()
+    assert [x.call for x in w._row_qsos] == ["K1ABC"]
+
+    dialog = QsoEditDialog(s, q)
+    assert dialog._call.text() == "K1ABC"
+    assert dialog._band.currentData() == "20m"
+    assert dialog._mode.currentData() == Mode.CW
+    assert dialog._exchange_edits["section"].text() == "WY"
+
+    # Edit call + section, leave band/mode -> exact frequency is preserved.
+    dialog._call.setText("K1XYZ")
+    dialog._exchange_edits["section"].setText("NM")
+    values = dialog.values()
+    assert values["freq_hz"] == 14_040_000
+    amended = s.update_qso(q, **values)
+    assert amended.call == "K1XYZ"
+    assert amended.exchange_rcvd["section"] == "NM"
+    assert [x.call for x in s.qsos()] == ["K1XYZ"]
+
+
+async def test_delete_qso_via_row():
+    w = _window()
+    s = w.session
+    q = await s.log_qso(
+        call="K1ABC", freq_hz=14_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    w.refresh()
+    assert w._qso_at(0).uuid == q.uuid
+    # _delete_qso shows a confirm dialog; exercise the underlying session call here.
+    s.delete_qso(w._qso_at(0))
+    assert s.qsos() == []
+
+
 def test_fkey_bar_only_visible_for_cw_and_ssb():
     w = _window()
     for mode in (Mode.CW, Mode.USB, Mode.LSB):

@@ -37,6 +37,7 @@ from partyhams.app.macros import bank_key, esm_step, expand, load_macros, save_m
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, default_rst
 from partyhams.core.models import (
+    QSO,
     Band,
     Mode,
     band_by_label,
@@ -1330,6 +1331,11 @@ class MainWindow(QMainWindow):
         self._table.setAlternatingRowColors(True)
         self._table.setShowGrid(False)
         self._table.horizontalHeader().setStretchLastSection(True)
+        # Right-click to delete, double-click to edit. _row_qsos maps rows -> QSO.
+        self._row_qsos: list[QSO] = []
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._show_qso_menu)
+        self._table.cellDoubleClicked.connect(lambda row, _col: self._edit_qso(row))
         return self._table
 
     # ------------------------------------------------------------------ #
@@ -1627,6 +1633,7 @@ class MainWindow(QMainWindow):
             qsos.reverse()
         else:
             qsos = list(reversed(self.session.recent(200)))  # newest first
+        self._row_qsos = qsos  # row index -> QSO (for edit/delete)
         self._table.setRowCount(len(qsos))
         local_station = self.session.engine.station_id
         for row, q in enumerate(qsos):
@@ -1643,6 +1650,59 @@ class MainWindow(QMainWindow):
                 if is_peer:
                     item.setForeground(QColor(style.PEER))
                 self._table.setItem(row, col, item)
+
+    def _qso_at(self, row: int) -> QSO | None:
+        return self._row_qsos[row] if 0 <= row < len(self._row_qsos) else None
+
+    def _show_qso_menu(self, pos) -> None:
+        """Right-click menu on a log row: edit or delete the QSO."""
+        from PySide6.QtWidgets import QMenu
+
+        qso = self._qso_at(self._table.rowAt(pos.y()))
+        if qso is None:
+            return
+        menu = QMenu(self)
+        edit = menu.addAction("Edit QSO…")
+        delete = menu.addAction("Delete QSO")
+        chosen = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if chosen is edit:
+            self._edit_qso(self._table.rowAt(pos.y()))
+        elif chosen is delete:
+            self._delete_qso(self._table.rowAt(pos.y()))
+
+    def _delete_qso(self, row: int) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        qso = self._qso_at(row)
+        if qso is None:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Delete QSO",
+            f"Delete the QSO with {qso.call} on {qso.band_label} {qso.mode.value}?",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        tombstone = self.session.delete_qso(qso)
+        self._broadcast(tombstone)
+        self.statusBar().showMessage(f"Deleted {qso.call}", 2500)
+
+    def _edit_qso(self, row: int) -> None:
+        from partyhams.ui.qso_dialog import QsoEditDialog
+
+        qso = self._qso_at(row)
+        if qso is None:
+            return
+        dialog = QsoEditDialog(self.session, qso, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = dialog.values()
+        if not values["call"]:
+            self.statusBar().showMessage("Not saved — a callsign is required", 3000)
+            return
+        amended = self.session.update_qso(qso, **values)  # type: ignore[arg-type]
+        self._broadcast(amended)
+        self.statusBar().showMessage(f"Updated {amended.call}", 2500)
 
     # ------------------------------------------------------------------ #
     # export

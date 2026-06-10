@@ -16,7 +16,9 @@ Enter logs the QSO.
   a CAT radio is connected it supplies band/mode/frequency automatically, so
   those pickers are hidden and the data is shown in the status bar instead.
 - **Log table** — every QSO in the active log, newest at the top, with columns
-  adapted to the contest (e.g. Field Day has no RST columns).
+  adapted to the contest (e.g. Field Day has no RST columns). **Double-click** a
+  row to edit a QSO's details, or **right-click** for Edit / Delete. Edits and
+  deletes sync to networked stations like new QSOs do.
 - **F-key macro bar** — twelve function-key messages for the current Run/S&P
   bank. It is shown only in **CW, USB, and LSB** (where keyed/voice macros
   apply); in data modes (RTTY, FT8/FT4) and FM/AM the bar is hidden, and when

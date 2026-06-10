@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 
 from partyhams.core.clock import LamportClock, new_uuid
@@ -171,6 +172,18 @@ class SyncEngine:
         self.log.apply(qso)
         self._notify(qso)
         return qso
+
+    def amend(self, qso: QSO) -> QSO:
+        """Re-merge an existing QSO (an edit or a tombstone) under a fresh lamport.
+
+        Keeps the original ``uuid`` so it replaces the prior version; the new
+        lamport is strictly greater than anything seen, so it wins last-writer-wins
+        on every peer. Returns the amended record (broadcast it like a new QSO).
+        """
+        amended = replace(qso, lamport=self.clock.tick())
+        self.log.apply(amended)
+        self._notify(amended)
+        return amended
 
     async def broadcast(self, qso: QSO) -> None:
         """Send a previously-recorded QSO to peers."""

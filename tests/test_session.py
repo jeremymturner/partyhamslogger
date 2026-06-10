@@ -71,6 +71,37 @@ async def test_dupe_digital_modes_share_a_group():
     assert s.is_dupe("N0CALL", FREQ_40M, Mode.FT8) is False  # different band
 
 
+async def test_update_qso_edits_in_place_and_reindexes():
+    s = make_session()
+    q = await s.log_qso(
+        call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "2A", "section": "EPA"}
+    )
+    assert s.is_dupe("K1ABC", FREQ_20M, Mode.CW)
+
+    amended = s.update_qso(
+        q, call="K1XYZ", freq_hz=FREQ_40M, mode=Mode.USB, exchange={"class": "1D", "section": "WY"}
+    )
+    assert amended.uuid == q.uuid  # same record, edited
+    assert amended.lamport > q.lamport  # wins last-writer-wins
+    assert [(x.call, x.band_label, x.mode.value) for x in s.qsos()] == [("K1XYZ", "40m", "USB")]
+    # Dupe index follows the edit: old slot freed, new slot taken.
+    assert not s.is_dupe("K1ABC", FREQ_20M, Mode.CW)
+    assert s.is_dupe("K1XYZ", FREQ_40M, Mode.USB)
+
+
+async def test_delete_qso_tombstones_and_persists():
+    s = make_session()
+    q = await s.log_qso(
+        call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "2A", "section": "EPA"}
+    )
+    tombstone = s.delete_qso(q)
+    assert tombstone.deleted and tombstone.uuid == q.uuid
+    assert s.qsos() == []  # gone from the live log
+    assert not s.is_dupe("K1ABC", FREQ_20M, Mode.CW)  # and from the dupe index
+    # The tombstone is persisted (so the delete survives a reopen / syncs to peers).
+    assert any(x.deleted for x in s.store.all(include_deleted=True))
+
+
 async def test_dupe_label_message():
     s = make_session()
     assert s.dupe_label("K1ABC", FREQ_20M, Mode.CW) == ""
