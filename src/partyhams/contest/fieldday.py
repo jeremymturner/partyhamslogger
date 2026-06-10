@@ -29,7 +29,7 @@ from partyhams.contest.base import (
     _macros,
 )
 from partyhams.contest.registry import register
-from partyhams.contest.sections import is_valid_section, nearest_section
+from partyhams.contest.sections import is_valid_section
 from partyhams.core.models import QSO, ModeGroup
 
 # Class = number of transmitters (1+) followed by a category letter A–F.
@@ -132,13 +132,7 @@ class FieldDay(ContestDefinition):
     def exchange_fields(self) -> list[ExchangeField]:
         return [
             ExchangeField("class", "Class", required=True, validator=is_valid_class),
-            ExchangeField(
-                "section",
-                "Section",
-                required=True,
-                validator=is_valid_section,
-                suggest=nearest_section,
-            ),
+            ExchangeField("section", "Section", required=True, validator=is_valid_section),
         ]
 
     def allowed_bands(self) -> set[str]:

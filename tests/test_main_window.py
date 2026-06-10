@@ -55,24 +55,28 @@ async def test_dupe_filters_log_to_that_call_and_clears():
     w.refresh()
     assert _table_calls(w) == ["K1ABC", "W2XYZ", "K1ABC"]
 
-    # Typing a dupe call filters the log to every QSO with that call.
+    # Typing a dupe call reds the call field and filters the log to that call.
     _set_mode(w, Mode.CW)
     w._band.setCurrentText("20m")
     w._call.setText("K1ABC")
     w._refresh_indicators()
-    assert w._status_badge.text() == "DUPE"
+    from partyhams.ui import style
+
+    assert style.DUPE in w._call.styleSheet()  # dupe -> red box on the call field
     assert w._call_filter == "K1ABC"
     assert _table_calls(w) == ["K1ABC", "K1ABC"]
 
-    # Clearing the call field removes the filter.
+    # Clearing the call field removes the red box and the filter.
     w._call.setText("")
     w._refresh_indicators()
+    assert w._call.styleSheet() == ""
     assert w._call_filter == ""
     assert _table_calls(w) == ["K1ABC", "W2XYZ", "K1ABC"]
 
-    # A call that isn't a dupe doesn't filter.
+    # A call that isn't a dupe doesn't red-box or filter.
     w._call.setText("N0NEW")
     w._refresh_indicators()
+    assert w._call.styleSheet() == ""
     assert w._call_filter == ""
     assert _table_calls(w) == ["K1ABC", "W2XYZ", "K1ABC"]
 
@@ -117,12 +121,13 @@ async def test_edit_dialog_validates_exchange_on_save():
     )
     dialog = QsoEditDialog(s, q)
 
-    # An invalid section blocks Save and offers a suggestion.
+    # An invalid section blocks Save (no suggestion offered).
     dialog._exchange_edits["section"].setText("ORE")
     dialog.accept()
     assert dialog.result() != QDialog.DialogCode.Accepted
     assert not dialog._error.isHidden()
-    assert "try OR?" in dialog._error.text()
+    assert "Section" in dialog._error.text() and "invalid" in dialog._error.text()
+    assert "try" not in dialog._error.text()
 
     # An empty callsign is also rejected.
     dialog._exchange_edits["section"].setText("OR")
@@ -217,6 +222,43 @@ def test_graceful_quit_filter_routes_quit_to_shutdown():
         assert calls == [1, 1]
     finally:
         app.removeEventFilter(f)
+
+
+async def test_section_field_boxed_red_invalid_green_new_none_valid():
+    from partyhams.ui import style
+
+    w = _window()
+    section = w._exchange_edits["section"]
+    w._call.setText("K1ABC")
+
+    # Invalid section -> red box.
+    section.setText("ORE")
+    w._refresh_indicators()
+    assert style.DUPE in section.styleSheet()
+    assert style.MULT not in section.styleSheet()
+
+    # Valid, not-yet-worked section -> green box (new multiplier).
+    section.setText("WY")
+    w._refresh_indicators()
+    assert style.MULT in section.styleSheet()
+    assert style.DUPE not in section.styleSheet()
+
+    # Valid section that's already a worked multiplier -> no box.
+    await w.session.log_qso(
+        call="W2XYZ", freq_hz=14_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "OR"}
+    )
+    section.setText("OR")
+    w._refresh_indicators()
+    assert section.styleSheet() == ""
+
+
+def test_log_button_label_is_just_log():
+    w = _window()
+    from PySide6.QtWidgets import QPushButton
+
+    labels = {b.text() for b in w.findChildren(QPushButton)}
+    assert "Log" in labels
+    assert "Log (Enter)" not in labels
 
 
 def test_theme_menu_has_nonselectable_dark_light_headers():

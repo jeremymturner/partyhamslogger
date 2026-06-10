@@ -116,9 +116,8 @@ class QsoEditDialog(QDialog):
         outer.addWidget(buttons)
 
     def _errors(self) -> list[str]:
-        """Validation problems with the current fields ([] when valid). Mirrors
-        the live entry row: required + per-field validators, with a suggestion for
-        a near-miss (e.g. an invalid section)."""
+        """Validation problems with the current fields ([] when valid): a required
+        call and per-field required/validator checks (e.g. an invalid section)."""
         problems: list[str] = []
         if not self._call.text().strip():
             problems.append("Callsign is required")
@@ -127,10 +126,7 @@ class QsoEditDialog(QDialog):
             if field.required and not value:
                 problems.append(f"{field.label} is required")
             elif value and field.validator and not field.validator(value):
-                msg = f"{field.label} '{value}' is invalid"
-                if field.suggest and (suggestion := field.suggest(value)):
-                    msg += f" — try {suggestion}?"
-                problems.append(msg)
+                problems.append(f"{field.label} '{value}' is invalid")
         return problems
 
     def accept(self) -> None:

@@ -1327,7 +1327,7 @@ class MainWindow(QMainWindow):
         hbox.addWidget(self._mode_label)
         hbox.addWidget(self._mode)
 
-        log_btn = QPushButton("Log (Enter)")
+        log_btn = QPushButton("Log")
         log_btn.clicked.connect(self._try_log)
         hbox.addWidget(log_btn)
 
@@ -1336,13 +1336,6 @@ class MainWindow(QMainWindow):
         self._esm_badge.setObjectName("esmBadge")
         self._esm_badge.setVisible(self._esm)
         hbox.addWidget(self._esm_badge)
-
-        # One status badge, shared by the dupe (red) and new-multiplier (green)
-        # indicators — only one applies at a time, so they occupy the same space and
-        # just swap text + color. Min width so toggling never squishes the fields.
-        self._status_badge = QLabel()
-        self._status_badge.setMinimumWidth(220)
-        hbox.addWidget(self._status_badge)
 
         hbox.addStretch(1)
         return row
@@ -1440,35 +1433,15 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # entry behavior
     # ------------------------------------------------------------------ #
-    def _badge_style(self, color: str) -> str:
-        """Inline style for the shared status badge: bold colored text on a tinted,
-        bordered backing (red for dupes, green for new multipliers)."""
-        return (
-            f"font-weight: bold; color: {color}; "
-            f"border: 1px solid {color}; border-radius: 3px; padding: 2px 6px;"
-        )
-
-    def _invalid_exchange(self, exchange: dict[str, str]) -> tuple[str, str | None] | None:
-        """The first exchange field whose non-empty value fails its validator,
-        as ``(label, suggested-fix-or-None)`` — else None. Drives the invalid-entry
-        badge (e.g. a mistyped Field Day section)."""
-        for field in self.session.contest.exchange_fields():
-            if field.validator is None:
-                continue
-            value = exchange.get(field.name, "").strip()
-            if value and not field.validator(value):
-                suggestion = field.suggest(value) if field.suggest else None
-                return field.label, suggestion
-        return None
-
     def _refresh_indicators(self) -> None:
-        """Update the shared dupe/new-multiplier badge and tint mult exchange fields."""
+        """Validation lives in the input boxes (no text badge): a dupe reds the call
+        field, an invalid exchange entry reds that field, and a new multiplier
+        (e.g. a new section) greens it."""
         call = self._call.text().strip().upper()
         if not call:
             self._esm_sent = False  # new QSO starts unsent
         freq, mode = self._current_freq(), self._current_mode()
-        dupe_msg = self.session.dupe_label(call, freq, mode) if call else ""
-        is_dupe = bool(dupe_msg)
+        is_dupe = self.session.is_dupe(call, freq, mode) if call else False
 
         # On a dupe, filter the log to that call so you can see every QSO the whole
         # network has made with it; clear the filter when the call isn't a dupe
@@ -1479,32 +1452,19 @@ class MainWindow(QMainWindow):
             self._reload_table()
 
         exchange = {name: e.text().strip().upper() for name, e in self._exchange_edits.items()}
-        invalid = self._invalid_exchange(exchange)
         new = self.session.new_mults(call, freq, mode, exchange) if call and not is_dupe else set()
         new_types = {mtype for mtype, _ in new}
 
-        # One badge, three states (dupe and invalid are both red; new-mult green):
-        # dupe wins, then an invalid exchange entry, then a new multiplier.
-        if is_dupe:
-            self._status_badge.setText(dupe_msg)
-            self._status_badge.setStyleSheet(self._badge_style(style.DUPE))
-        elif invalid is not None:
-            label, suggestion = invalid
-            msg = f"✗ Invalid {label}"
-            if suggestion:
-                msg += f" — try {suggestion}?"
-            self._status_badge.setText(msg)
-            self._status_badge.setStyleSheet(self._badge_style(style.DUPE))
-        elif new:
-            self._status_badge.setText("★ NEW " + "/".join(sorted(t.upper() for t in new_types)))
-            self._status_badge.setStyleSheet(self._badge_style(style.MULT))
-        else:
-            self._status_badge.setText("")
-            self._status_badge.setStyleSheet("")
-        # Tint the exchange field(s) that carry a new multiplier.
+        # A duplicate callsign reds the call field.
+        self._call.setStyleSheet(f"border: 1px solid {style.DUPE};" if is_dupe else "")
+        # Box each exchange field: red if its value is invalid, green if it carries a
+        # new multiplier (e.g. a new section), nothing when valid and not new.
         for field in self.session.contest.exchange_fields():
             edit = self._exchange_edits[field.name]
-            if field.name in new_types and edit.text().strip():
+            value = edit.text().strip().upper()
+            if value and field.validator is not None and not field.validator(value):
+                edit.setStyleSheet(f"border: 1px solid {style.DUPE};")
+            elif value and field.name in new_types:
                 edit.setStyleSheet(
                     f"border: 1px solid {style.MULT}; background-color: {style.MULT_BG};"
                 )
