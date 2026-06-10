@@ -69,7 +69,7 @@ from partyhams.wsjtx.listener import WsjtxListener
 from partyhams.wsjtx.protocol import Decode, QSOLogged, Status
 
 # Modes offered in the entry row.
-_ENTRY_MODES = [Mode.CW, Mode.USB, Mode.LSB, Mode.FM, Mode.RTTY, Mode.FT8]
+_ENTRY_MODES = [Mode.CW, Mode.USB, Mode.LSB, Mode.FM, Mode.RTTY, Mode.FT8, Mode.FT4]
 
 # Default hint shown on the empty call field (replaced by live match/QSL hints).
 _CALL_TOOLTIP = (
@@ -372,9 +372,7 @@ class MainWindow(QMainWindow):
 
     async def _do_qrz_lookup(self, call: str) -> None:
         """Run the (blocking) QRZ lookup off the UI thread and show the result."""
-        record = await asyncio.get_event_loop().run_in_executor(
-            None, self._qrz.lookup, call
-        )
+        record = await asyncio.get_event_loop().run_in_executor(None, self._qrz.lookup, call)
         if call != self._call.text().strip().upper():
             return  # the operator moved on; don't clobber a newer entry
         if record is not None:
@@ -835,9 +833,7 @@ class MainWindow(QMainWindow):
     def _choose_wsjtx_port(self) -> None:
         from PySide6.QtWidgets import QInputDialog
 
-        port, ok = QInputDialog.getInt(
-            self, "WSJT-X UDP Port", "Port:", self._wsjtx_port, 1, 65535
-        )
+        port, ok = QInputDialog.getInt(self, "WSJT-X UDP Port", "Port:", self._wsjtx_port, 1, 65535)
         if not ok:
             return
         self.set_wsjtx(self._wsjtx_enabled, port)
@@ -907,11 +903,16 @@ class MainWindow(QMainWindow):
     def _on_wsjtx_status(self, status: Status) -> None:
         """Track WSJT-X transmit state; flip to the info panel for data modes."""
         self._wsjtx_id = status.id
-        group = mode_group_for(self._map_status_mode(status.mode))
+        mapped = self._map_status_mode(status.mode)
+        group = mode_group_for(mapped)
         active = group.value == "DIGITAL"
         self._set_wsjtx_active(active)
         if not active:
             return
+        # Reflect WSJT-X's actual data mode (FT8 vs FT4) in the entry mode field.
+        mode_idx = self._mode.findData(mapped)
+        if mode_idx >= 0:
+            self._mode.setCurrentIndex(mode_idx)
         sending = status.tx_mode or status.mode
         if status.dx_call:
             sending = f"{status.dx_call} ({sending})"
@@ -949,10 +950,17 @@ class MainWindow(QMainWindow):
         if active == self._wsjtx_active:
             return
         self._wsjtx_active = active
-        self._fkey_bar.setVisible(not active)
-        self._wsjtx_panel.setVisible(active)
+        self._update_bottom_bars()
         if not active:
             self._wsjtx_panel.clear_decodes()
+
+    def _update_bottom_bars(self) -> None:
+        """Decide what fills the slot below the log. The F-key macro bar shows only
+        for CW/SSB (where macros apply); the WSJT-X panel shows while WSJT-X drives a
+        data mode; other modes (RTTY, FM/AM, FT8/FT4 without WSJT-X) show neither."""
+        self._wsjtx_panel.setVisible(self._wsjtx_active)
+        macro_mode = self._current_mode() in (Mode.CW, Mode.USB, Mode.LSB)
+        self._fkey_bar.setVisible(macro_mode and not self._wsjtx_active)
 
     def _maybe_highlight(self, decode: Decode) -> None:
         """Best-effort: tell WSJT-X to color CQ candidates whose section we need.
@@ -1415,6 +1423,7 @@ class MainWindow(QMainWindow):
         self._update_call_hint(call)
         self._update_freq_readout()
         self._update_fkey_bar()  # F-key labels follow the mode (CW vs phone)
+        self._update_bottom_bars()  # show the F-key bar only for CW/SSB modes
         # Let peers see what band/mode we're on (broadcast by the presence loop).
         self.session.set_local_status(freq, mode)
 
@@ -1631,6 +1640,4 @@ class MainWindow(QMainWindow):
         if self.on_change_autoexport is not None:
             self.on_change_autoexport(enabled, self._autoexport_minutes, only_if_new)
         state = "on" if enabled else "off"
-        self.statusBar().showMessage(
-            f"Auto-export {state} ({self._autoexport_minutes} min)", 3000
-        )
+        self.statusBar().showMessage(f"Auto-export {state} ({self._autoexport_minutes} min)", 3000)

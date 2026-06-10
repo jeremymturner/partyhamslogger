@@ -329,6 +329,12 @@ def test_map_mode():
     assert mode_group_for(map_mode("MSK144")) == ModeGroup.DIGITAL
 
 
+def test_map_mode_decode_submode_codes():
+    # Decode (type 2) packets carry a single-char submode code, not the name.
+    assert map_mode("~") == Mode.FT8
+    assert map_mode("+") == Mode.FT4
+
+
 def test_qso_logged_to_record_mapping():
     msg = parse_message(_qso_logged_bytes())
     assert isinstance(msg, QSOLogged)

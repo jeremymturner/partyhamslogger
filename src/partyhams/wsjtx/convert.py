@@ -14,9 +14,16 @@ from partyhams.wsjtx.protocol import QSOLogged
 # WSJT-X mode strings -> our concrete Mode. WSJT-X reports many digital
 # sub-modes (FT8, FT4, JT9, MSK144, ...); anything not FT4 maps to FT8's
 # DIGITAL mode-group, which is what scoring/dupe rules key on.
+#
+# Status (type 1) packets carry the full mode name ("FT8"/"FT4"), but Decode
+# (type 2) packets carry only the single-character submode code from WSJT-X's
+# band-activity grid ("~" = FT8, "+" = FT4). Both forms are mapped here so FT8
+# and FT4 are told apart wherever a packet's mode field is read.
 _MODE_MAP: dict[str, Mode] = {
     "FT8": Mode.FT8,
+    "~": Mode.FT8,  # Decode-packet submode code for FT8
     "FT4": Mode.FT4,
+    "+": Mode.FT4,  # Decode-packet submode code for FT4
     "RTTY": Mode.RTTY,
     "PSK31": Mode.PSK31,
     "PSK": Mode.PSK31,
@@ -29,7 +36,10 @@ _MODE_MAP: dict[str, Mode] = {
 
 
 def map_mode(mode: str) -> Mode:
-    """Best-effort WSJT-X mode string -> :class:`Mode` (default FT8/DIGITAL)."""
+    """Best-effort WSJT-X mode string -> :class:`Mode` (default FT8/DIGITAL).
+
+    Accepts both the full name from Status packets ("FT8"/"FT4") and the
+    single-character submode code from Decode packets ("~"/"+")."""
     return _MODE_MAP.get(mode.strip().upper(), Mode.FT8)
 
 

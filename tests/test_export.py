@@ -6,7 +6,7 @@ from datetime import datetime
 
 from partyhams.app.session import build_session
 from partyhams.core.models import Mode
-from partyhams.export import timestamped_adif_name
+from partyhams.export import adif_to_mode, timestamped_adif_name
 
 FREQ_20M = 14_040_000
 
@@ -48,6 +48,38 @@ async def test_adif_structure():
     assert "<MODE:3>SSB" in adif  # USB maps to SSB in ADIF
     assert "<SRX_STRING:6>2A EPA" in adif
     assert "<CONTEST_ID:7>ARRL-FD" in adif
+
+
+async def test_adif_ft8_ft4_mode_and_submode():
+    """FT8 is a top-level ADIF MODE; FT4 is a SUBMODE of MFSK."""
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W7ABC",
+        sent_exchange={"class": "1E", "section": "OR"},
+        network=None,
+    )
+    await s.log_qso(
+        call="K1ABC", freq_hz=7_074_000, mode=Mode.FT8, exchange={"class": "1D", "section": "WY"}
+    )
+    await s.log_qso(
+        call="W2XYZ", freq_hz=7_047_500, mode=Mode.FT4, exchange={"class": "1D", "section": "NM"}
+    )
+    adif = s.export_adif()
+    assert "<MODE:3>FT8" in adif
+    assert "<MODE:4>MFSK" in adif
+    assert "<SUBMODE:3>FT4" in adif
+    # FT8 carries no submode.
+    assert "<SUBMODE:3>FT8" not in adif
+
+
+def test_adif_to_mode_roundtrip():
+    assert adif_to_mode("FT8") == Mode.FT8
+    assert adif_to_mode("MFSK", "FT4") == Mode.FT4
+    assert adif_to_mode("PSK", "PSK31") == Mode.PSK31
+    assert adif_to_mode("CW") == Mode.CW
+    # A bare parent mode with no submode is ambiguous -> unrecognised.
+    assert adif_to_mode("MFSK") is None
+    assert adif_to_mode("ZZZ") is None
 
 
 async def test_cabrillo_structure():

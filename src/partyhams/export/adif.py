@@ -25,18 +25,41 @@ def timestamped_adif_name(call: str, contest_id: str, when: datetime) -> str:
     safe = re.sub(r"[^A-Za-z0-9]+", "_", call).strip("_") or "log"
     return f"{safe}-{contest_id}-{when.strftime('%Y%m%d-%H%M%S')}.adi"
 
-# our Mode -> ADIF MODE enumeration
-_ADIF_MODE: dict[Mode, str] = {
-    Mode.CW: "CW",
-    Mode.USB: "SSB",
-    Mode.LSB: "SSB",
-    Mode.FM: "FM",
-    Mode.AM: "AM",
-    Mode.RTTY: "RTTY",
-    Mode.PSK31: "PSK",
-    Mode.FT8: "FT8",
-    Mode.FT4: "FT4",
+
+# our Mode -> ADIF (MODE, SUBMODE). ADIF treats some modes as submodes of a
+# parent: FT4 is a submode of MFSK, PSK31 a submode of PSK. FT8 is its own
+# top-level MODE (no submode). A None submode means "emit MODE only".
+_ADIF_MODE: dict[Mode, tuple[str, str | None]] = {
+    Mode.CW: ("CW", None),
+    Mode.USB: ("SSB", None),
+    Mode.LSB: ("SSB", None),
+    Mode.FM: ("FM", None),
+    Mode.AM: ("AM", None),
+    Mode.RTTY: ("RTTY", None),
+    Mode.PSK31: ("PSK", "PSK31"),
+    Mode.FT8: ("FT8", None),
+    Mode.FT4: ("MFSK", "FT4"),
 }
+
+# Reverse map for import: (MODE, SUBMODE) -> our Mode. The submode wins when it
+# names a specific mode (e.g. MFSK/FT4 -> FT4); otherwise the MODE decides.
+_MODE_FROM_ADIF: dict[tuple[str, str | None], Mode] = {
+    (mode, sub): m for m, (mode, sub) in _ADIF_MODE.items()
+}
+
+
+def adif_to_mode(mode: str, submode: str = "") -> Mode | None:
+    """Map an ADIF ``MODE``/``SUBMODE`` pair back to our :class:`Mode`.
+
+    Reverses :data:`_ADIF_MODE`, so e.g. ``("MFSK", "FT4") -> Mode.FT4`` and
+    ``("FT8", "") -> Mode.FT8``. Tries the submode first (it's more specific),
+    then falls back to the bare MODE. Returns None if neither is recognized.
+    """
+    mode = mode.strip().upper()
+    submode = submode.strip().upper()
+    if submode and (mode, submode) in _MODE_FROM_ADIF:
+        return _MODE_FROM_ADIF[(mode, submode)]
+    return _MODE_FROM_ADIF.get((mode, None))
 
 
 def _field(name: str, value: str) -> str:
@@ -60,7 +83,12 @@ def qso_to_adif(qso: QSO, config: ContestConfig) -> str:
         _field("TIME_ON", qso.timestamp.strftime("%H%M%S")),
         _field("BAND", _adif_band(qso.band_label)),
         _field("FREQ", f"{qso.freq_hz / 1_000_000:.6f}"),
-        _field("MODE", _ADIF_MODE.get(qso.mode, qso.mode.value)),
+    ]
+    adif_mode, adif_submode = _ADIF_MODE.get(qso.mode, (qso.mode.value, None))
+    parts.append(_field("MODE", adif_mode))
+    if adif_submode:
+        parts.append(_field("SUBMODE", adif_submode))
+    parts += [
         _field("OPERATOR", qso.operator.upper()),
         _field("STATION_CALLSIGN", config.my_call.upper()),
     ]
