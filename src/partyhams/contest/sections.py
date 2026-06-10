@@ -133,6 +133,15 @@ def is_valid_section(value: str) -> bool:
     return value.upper() in ARRL_SECTIONS
 
 
+def nearest_section(value: str) -> str | None:
+    """The closest valid section to a (presumably mistyped) abbreviation, or None
+    if nothing is similar enough. Used to suggest a fix for an invalid entry."""
+    import difflib
+
+    matches = difflib.get_close_matches(value.upper(), ARRL_SECTIONS, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
 # Sections grouped by US call district (0–9), VE for Canada, DX for the rest.
 # This is the conventional call-area grouping used by section maps (PR/VI sit with
 # the Southeastern "4" group; AK/PAC with their nearest mainland district).

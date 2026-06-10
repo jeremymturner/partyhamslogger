@@ -12,6 +12,7 @@ from partyhams.contest.sections import (
     ARRL_SECTIONS,
     SECTION_GROUPS,
     is_valid_section,
+    nearest_section,
     section_group,
 )
 from partyhams.core.models import Mode
@@ -37,6 +38,15 @@ def test_class_and_section_validation():
     assert is_valid_section("epa")  # case-insensitive
     assert is_valid_section("DX")
     assert not is_valid_section("ZZ")
+
+
+def test_nearest_section_suggests_close_match():
+    assert nearest_section("ORE") == "OR"  # extra letter
+    assert nearest_section("EPAA") == "EPA"
+    assert nearest_section("ctt") == "CT"  # case-insensitive
+    assert nearest_section("OR") == "OR"  # already valid -> itself
+    assert nearest_section("ZZ") is None  # nothing similar
+    assert nearest_section("") is None
 
 
 def test_section_list_matches_official_contest_list():

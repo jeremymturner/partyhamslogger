@@ -24,6 +24,8 @@ class ExchangeField:
     required: bool = True
     # Optional validator; returns True if the raw string is acceptable.
     validator: Callable[[str], bool] | None = None
+    # Optional: given an invalid entry, suggest the closest valid value (or None).
+    suggest: Callable[[str], str | None] | None = None
 
 
 @dataclass(frozen=True)

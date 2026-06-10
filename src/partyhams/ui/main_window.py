@@ -1357,6 +1357,19 @@ class MainWindow(QMainWindow):
             f"border: 1px solid {color}; border-radius: 3px; padding: 2px 6px;"
         )
 
+    def _invalid_exchange(self, exchange: dict[str, str]) -> tuple[str, str | None] | None:
+        """The first exchange field whose non-empty value fails its validator,
+        as ``(label, suggested-fix-or-None)`` — else None. Drives the invalid-entry
+        badge (e.g. a mistyped Field Day section)."""
+        for field in self.session.contest.exchange_fields():
+            if field.validator is None:
+                continue
+            value = exchange.get(field.name, "").strip()
+            if value and not field.validator(value):
+                suggestion = field.suggest(value) if field.suggest else None
+                return field.label, suggestion
+        return None
+
     def _refresh_indicators(self) -> None:
         """Update the shared dupe/new-multiplier badge and tint mult exchange fields."""
         call = self._call.text().strip().upper()
@@ -1367,12 +1380,21 @@ class MainWindow(QMainWindow):
         is_dupe = bool(dupe_msg)
 
         exchange = {name: e.text().strip().upper() for name, e in self._exchange_edits.items()}
+        invalid = self._invalid_exchange(exchange)
         new = self.session.new_mults(call, freq, mode, exchange) if call and not is_dupe else set()
         new_types = {mtype for mtype, _ in new}
 
-        # Dupe (red) wins over a new multiplier (green); they share one badge.
+        # One badge, three states (dupe and invalid are both red; new-mult green):
+        # dupe wins, then an invalid exchange entry, then a new multiplier.
         if is_dupe:
             self._status_badge.setText(dupe_msg)
+            self._status_badge.setStyleSheet(self._badge_style(style.DUPE))
+        elif invalid is not None:
+            label, suggestion = invalid
+            msg = f"✗ Invalid {label}"
+            if suggestion:
+                msg += f" — try {suggestion}?"
+            self._status_badge.setText(msg)
             self._status_badge.setStyleSheet(self._badge_style(style.DUPE))
         elif new:
             self._status_badge.setText("★ NEW " + "/".join(sorted(t.upper() for t in new_types)))
