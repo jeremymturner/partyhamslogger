@@ -20,7 +20,17 @@ dev venv on first use, then run `packaging/partyhams.spec`.
 | Linux `.rpm`           | Linux (Fedora/RHEL)   | `make package-rpm`         | `dist/partyhams-logger-*.rpm` |
 
 ¹ universal2 requires a Python interpreter built as `universal2` (the
-python.org installers are; Homebrew's is single-arch).
+python.org installers are; Homebrew's is single-arch). `make
+package-mac-universal` builds its **own** venv (`.venv-universal`) from such an
+interpreter — it auto-discovers a python.org universal2 Python under
+`/Library/Frameworks/Python.framework/Versions/*`, or pass one explicitly:
+
+```sh
+make UNIVERSAL_PYTHON=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 package-mac-universal
+```
+
+If no universal2 interpreter is found (e.g. only Homebrew's arm64 Python is
+installed), the target stops with instructions instead of failing mid-build.
 
 ## Prerequisites
 

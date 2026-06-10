@@ -90,10 +90,38 @@ package: $(PKG_STAMP) ## Build a standalone app for THIS OS (-> dist/)
 	@$(PY) -m PyInstaller --noconfirm --clean packaging/partyhams.spec
 	@echo ">> built dist/ (see docs/PACKAGING.md)"
 
+# universal2 needs a universal2 interpreter (python.org installers are; Homebrew's
+# arm64 build isn't), so it gets its OWN venv from such a python — the dev .venv
+# can't produce a fat binary. Auto-discover a python.org universal2 python; override
+# with: make UNIVERSAL_PYTHON=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 …
+UVENV  := .venv-universal
+UPY    := $(UVENV)/bin/python
+UPIP   := $(UVENV)/bin/pip
+USTAMP := $(UVENV)/.installed
+PYFW   := /Library/Frameworks/Python.framework/Versions
+UNIVERSAL_PYTHON ?= $(shell for v in 3.13 3.12 3.14 3.11; do p="$(PYFW)/$$v/bin/python3"; [ -x "$$p" ] && lipo -archs "$$p" 2>/dev/null | grep -qw arm64 && lipo -archs "$$p" 2>/dev/null | grep -qw x86_64 && { echo "$$p"; break; }; done)
+
+$(UPY):
+	@test -n "$(UNIVERSAL_PYTHON)" || { \
+		echo "ERROR: no universal2 Python found."; \
+		echo "Install the universal2 build from https://www.python.org/downloads/macos/ , or"; \
+		echo "point at one: make UNIVERSAL_PYTHON=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 package-mac-universal"; \
+		exit 1; }
+	@lipo -archs "$(UNIVERSAL_PYTHON)" 2>/dev/null | grep -qw arm64 \
+		&& lipo -archs "$(UNIVERSAL_PYTHON)" 2>/dev/null | grep -qw x86_64 || { \
+		echo "ERROR: $(UNIVERSAL_PYTHON) is not universal2 (needs both arm64 and x86_64)."; exit 1; }
+	@echo ">> creating universal2 venv with $(UNIVERSAL_PYTHON)"
+	@$(UNIVERSAL_PYTHON) -m venv $(UVENV)
+
+$(USTAMP): $(UPY) pyproject.toml
+	@echo ">> installing partyhams + packaging deps (universal2 wheels) into $(UVENV)"
+	@$(UPIP) install -q --upgrade pip
+	@$(UPIP) install -q -e ".[packaging]"
+	@touch $(USTAMP)
+
 .PHONY: package-mac-universal
-package-mac-universal: $(PKG_STAMP) ## macOS universal2 .app (Intel + Apple Silicon)
-	@$(PY) -c "import os,sys,subprocess as s; p=os.path.realpath(sys.executable); a=set(s.run(['lipo','-archs',p],capture_output=True,text=True).stdout.split()); ok={'arm64','x86_64'}<=a; sys.stderr.write('' if ok else 'ERROR: this Python (%s) is %s-only; universal2 needs a universal2 interpreter (use the python.org installer) — see docs/PACKAGING.md\n'%(p,'+'.join(sorted(a)) or 'unknown')); sys.exit(0 if ok else 1)"
-	@PYI_TARGET_ARCH=universal2 $(PY) -m PyInstaller --noconfirm --clean packaging/partyhams.spec
+package-mac-universal: $(USTAMP) ## macOS universal2 .app (Intel + Apple Silicon)
+	@PYI_TARGET_ARCH=universal2 $(UPY) -m PyInstaller --noconfirm --clean packaging/partyhams.spec
 	@echo ">> built dist/PartyHamsLogger.app (universal2)"
 
 .PHONY: package-appimage
@@ -128,6 +156,6 @@ clean: ## Remove caches and build artifacts (keeps the venv)
 	@echo ">> cleaned"
 
 .PHONY: distclean
-distclean: clean ## Also remove the virtualenv
-	@rm -rf $(VENV)
-	@echo ">> removed $(VENV)"
+distclean: clean ## Also remove the virtualenvs
+	@rm -rf $(VENV) $(UVENV)
+	@echo ">> removed $(VENV) $(UVENV)"
