@@ -191,6 +191,34 @@ async def test_log_rows_colored_by_operator_not_station_id():
     assert again["K1ABC"] != peer_color  # still white after the station_id change
 
 
+def test_graceful_quit_filter_routes_quit_to_shutdown():
+    """⌘Q / app-menu Quit is intercepted and run through the graceful path instead
+    of stopping the qasync loop mid-await."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.app import _GracefulQuitFilter
+
+    app = QApplication.instance() or QApplication([])
+    calls = []
+    f = _GracefulQuitFilter(lambda: calls.append(1))
+
+    # A Quit event runs on_quit and is consumed (so Qt won't tear down the loop).
+    assert f.eventFilter(app, QEvent(QEvent.Type.Quit)) is True
+    assert calls == [1]
+    # Other events pass through untouched.
+    assert f.eventFilter(app, QEvent(QEvent.Type.User)) is False
+    assert calls == [1]
+
+    # And once installed, a Quit delivered to the app is intercepted.
+    app.installEventFilter(f)
+    try:
+        app.sendEvent(app, QEvent(QEvent.Type.Quit))
+        assert calls == [1, 1]
+    finally:
+        app.removeEventFilter(f)
+
+
 def test_theme_menu_has_nonselectable_dark_light_headers():
     from PySide6.QtWidgets import QMenu
 

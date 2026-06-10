@@ -15,6 +15,7 @@ import contextlib
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QApplication, QDialog
 
 from partyhams.app.radio import RadioPoller
@@ -32,6 +33,28 @@ from partyhams.ui.radio_dialog import RadioDialog
 from partyhams.ui.style import app_icon, apply_font, apply_theme
 
 APP_NAME = "PartyHams Logger"
+
+
+class _GracefulQuitFilter(QObject):
+    """Route an app-level Quit (macOS ⌘Q, the app menu's Quit) through the same
+    graceful shutdown as closing the window.
+
+    Without this, ⌘Q stops the qasync event loop while ``amain()`` is still
+    awaiting the window-close event — raising "Event loop stopped before Future
+    completed" and leaking a pending task. We instead run ``on_quit`` (which
+    unblocks ``amain``'s teardown; it calls ``app.quit()`` itself once done) and
+    consume the event so Qt doesn't tear the loop down underneath us.
+    """
+
+    def __init__(self, on_quit) -> None:
+        super().__init__()
+        self._on_quit = on_quit
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Quit:
+            self._on_quit()
+            return True  # consume: the graceful path stops the loop when ready
+        return super().eventFilter(obj, event)
 
 
 def _set_macos_app_name(name: str) -> None:
@@ -181,6 +204,14 @@ def run() -> int:
     # ctx carries the live state across the window loop: the session in use, the
     # next one to switch to (set by New/Open Log), and the shared radio poller.
     ctx: dict = {"session": session, "next": None, "poller": None}
+
+    def _graceful_quit() -> None:
+        ctx["next"] = None  # quit, don't reopen another window
+        if not close_event.is_set():
+            close_event.set()  # let amain() finish teardown, then it calls app.quit()
+
+    quit_filter = _GracefulQuitFilter(_graceful_quit)
+    app.installEventFilter(quit_filter)
 
     async def amain() -> None:
         while ctx["session"] is not None:
@@ -343,5 +374,12 @@ def run() -> int:
                 win.restyle()
 
     with loop:
-        loop.run_until_complete(amain())
+        try:
+            loop.run_until_complete(amain())
+        except RuntimeError as exc:
+            # Belt-and-suspenders: if a quit path still stops the loop before
+            # amain() finishes (the window is already gone by then), treat this
+            # specific qasync error as a normal exit instead of crashing.
+            if "Event loop stopped before Future completed" not in str(exc):
+                raise
     return 0
