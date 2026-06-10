@@ -6,6 +6,9 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from types import SimpleNamespace  # noqa: E402
+
+from partyhams.app.radio import RadioState  # noqa: E402
 from partyhams.app.session import build_session  # noqa: E402
 from partyhams.core.models import Mode  # noqa: E402
 from partyhams.wsjtx.protocol import Status  # noqa: E402
@@ -41,6 +44,35 @@ def test_fkey_bar_only_visible_for_cw_and_ssb():
     for mode in (Mode.FM, Mode.RTTY, Mode.FT8, Mode.FT4):
         _set_mode(w, mode)
         assert w._fkey_bar.isHidden(), f"F-keys should hide in {mode.value}"
+
+
+def _fake_poller(freq_hz: int, mode: Mode, *, connected: bool = True):
+    radio = SimpleNamespace(description=lambda: "Test Rig")
+    return SimpleNamespace(
+        connected=connected,
+        state=RadioState(freq_hz=freq_hz, mode=mode),
+        on_state=None,
+        on_status=None,
+        radio=radio,
+    )
+
+
+def test_band_mode_boxes_hidden_under_cat_and_shown_manually():
+    w = _window()
+    # Manual (no radio): both pickers visible; status bar shows freq + band only.
+    assert not w._band.isHidden() and not w._mode.isHidden()
+    assert "CW" not in w._freq.text()  # mode lives in the visible box, not the bar
+
+    # With a CAT radio the rig supplies band/mode: pickers hide, status bar gains mode.
+    w.set_poller(_fake_poller(14_175_000, Mode.CW))
+    assert w._band.isHidden() and w._mode.isHidden()
+    assert w._band_label.isHidden() and w._mode_label.isHidden()
+    text = w._freq.text()
+    assert "20m" in text and text.rstrip().endswith("CW")  # frequency band mode
+
+    # Detaching the radio brings the manual pickers back.
+    w.set_poller(None)
+    assert not w._band.isHidden() and not w._mode.isHidden()
 
 
 def test_wsjtx_status_sets_entry_mode_and_swaps_panel():

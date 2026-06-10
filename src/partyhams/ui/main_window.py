@@ -1165,8 +1165,7 @@ class MainWindow(QMainWindow):
         self._radio_freq = None
         self._radio_mode = None
         self._radio_connected = poller.connected if poller is not None else False
-        self._band.setEnabled(not self._cat)
-        self._mode.setEnabled(not self._cat)
+        self._update_band_mode_boxes()
         if poller is not None:
             poller.on_state = self._on_radio_state
             poller.on_status = self._on_radio_status
@@ -1176,6 +1175,14 @@ class MainWindow(QMainWindow):
             self._cluster_window.set_poller(poller)
         self._refresh_indicators()
         self._update_radio_label()
+
+    def _update_band_mode_boxes(self) -> None:
+        """Show the manual Band/Mode pickers only when no radio supplies them.
+        With CAT the rig reports band+mode automatically, so the boxes are hidden
+        and that data appears in the status bar's frequency readout instead."""
+        show = not self._cat
+        for w in (self._band_label, self._band, self._mode_label, self._mode):
+            w.setVisible(show)
 
     def _update_radio_label(self) -> None:
         if self._poller is None:
@@ -1236,7 +1243,9 @@ class MainWindow(QMainWindow):
             hbox.addWidget(QLabel(field.label))
             hbox.addWidget(edit)
 
-        # Band + mode (no CAT yet — chosen manually; auto-fill comes next).
+        # Manual Band + Mode pickers. These are shown only when no CAT radio is
+        # feeding band/mode; with a radio they're hidden and that data moves to
+        # the status bar (see _update_band_mode_boxes / _update_freq_readout).
         self._band = QComboBox()
         for band in self._sorted_bands():
             self._band.addItem(band.label, band)
@@ -1244,14 +1253,16 @@ class MainWindow(QMainWindow):
         if default_band >= 0:
             self._band.setCurrentIndex(default_band)
         self._band.currentIndexChanged.connect(lambda *_: self._refresh_indicators())
-        hbox.addWidget(QLabel("Band"))
+        self._band_label = QLabel("Band")
+        hbox.addWidget(self._band_label)
         hbox.addWidget(self._band)
 
         self._mode = QComboBox()
         for mode in _ENTRY_MODES:
             self._mode.addItem(mode.value, mode)
         self._mode.currentIndexChanged.connect(lambda *_: self._refresh_indicators())
-        hbox.addWidget(QLabel("Mode"))
+        self._mode_label = QLabel("Mode")
+        hbox.addWidget(self._mode_label)
         hbox.addWidget(self._mode)
 
         log_btn = QPushButton("Log (Enter)")
@@ -1345,7 +1356,8 @@ class MainWindow(QMainWindow):
         text = f"{mhz}.{khz:03d}.{hz:02d}  {band.label if band else '?'}"
         if self._cat:
             if self._radio_connected:
-                self._freq.setText(f"📻 {text}")
+                # Frequency, band, and mode — the Band/Mode boxes are hidden under CAT.
+                self._freq.setText(f"📻 {text}  {self._current_mode().value}")
                 self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
             else:
                 self._freq.setText("📻 no radio")

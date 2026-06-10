@@ -11,9 +11,10 @@ Enter logs the QSO.
 - **Score bar** — your station call, the contest name, and a live tally:
   QSOs, points, sections (multipliers), power multiplier, and total score.
 - **Entry row** — the call field plus exchange fields generated from the
-  contest definition, then Band and Mode, a **Log (Enter)** button, and a
-  dupe / new-multiplier badge. When a radio is connected the band/mode/frequency
-  follow the rig (CAT) and the manual combos mirror them read-only.
+  contest definition, then a **Log (Enter)** button and a dupe / new-multiplier
+  badge. Without a radio, manual **Band** and **Mode** pickers appear here; when
+  a CAT radio is connected it supplies band/mode/frequency automatically, so
+  those pickers are hidden and the data is shown in the status bar instead.
 - **Log table** — every QSO in the active log, newest at the top, with columns
   adapted to the contest (e.g. Field Day has no RST columns).
 - **F-key macro bar** — twelve function-key messages for the current Run/S&P
@@ -21,8 +22,8 @@ Enter logs the QSO.
   apply); in data modes (RTTY, FT8/FT4) and FM/AM the bar is hidden, and when
   WSJT-X is driving a data mode it is replaced by the [WSJT-X panel](wsjtx.md).
 - **Status bar** — transmit indicator on the left; on the right the live
-  frequency readout and the connected radio (or "No radio (manual)"), plus
-  transient messages.
+  readout (frequency, band, and — with a CAT radio — mode) and the connected
+  radio (or "No radio (manual)"), plus transient messages.
 - **Network dock** — the [Network panel](network-panel.md) docks on the right.
 
 ## Keyboard flow
