@@ -14,7 +14,7 @@ import asyncio
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QActionGroup, QCloseEvent, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
@@ -669,6 +669,30 @@ class MainWindow(QMainWindow):
                 return
         self._call.setFocus()
 
+    def eventFilter(self, obj: object, event: QEvent) -> bool:
+        """Space/Tab walk forward through the QSO entry fields, Shift+Tab back.
+        The key is consumed (no space is typed); installed on the entry fields in
+        _build_entry_row."""
+        if event.type() == QEvent.Type.KeyPress and obj in self._entry_fields:
+            key = event.key()
+            shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            if key == Qt.Key.Key_Backtab or (key == Qt.Key.Key_Tab and shift):
+                self._advance_entry_field(obj, -1)
+                return True
+            if key in (Qt.Key.Key_Space, Qt.Key.Key_Tab):
+                self._advance_entry_field(obj, +1)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _advance_entry_field(self, current: object, delta: int) -> None:
+        """Move focus to the next/previous QSO entry field (no wrap). The target's
+        text is selected so it can be overtyped."""
+        i = self._entry_fields.index(current) + delta
+        if 0 <= i < len(self._entry_fields):
+            target = self._entry_fields[i]
+            target.setFocus()
+            target.selectAll()
+
     def _send_cw(self, text: str, tx_desc: tuple[int, str, str] | None = None) -> None:
         radio = self._poller.radio if self._poller is not None else None
         if radio is None or not radio.supports(Capability.SEND_CW):
@@ -1305,6 +1329,13 @@ class MainWindow(QMainWindow):
             self._exchange_edits[field.name] = edit
             hbox.addWidget(QLabel(field.label))
             hbox.addWidget(edit)
+
+        # Keyboard-first entry: Space/Tab walk forward through call -> exchange
+        # fields, Shift+Tab back. Handled in eventFilter (which consumes the key so
+        # no space is inserted) — see _advance_entry_field.
+        self._entry_fields: list[QLineEdit] = [self._call, *self._exchange_edits.values()]
+        for f in self._entry_fields:
+            f.installEventFilter(self)
 
         # Manual Band + Mode pickers. These are shown only when no CAT radio is
         # feeding band/mode; with a radio they're hidden and that data moves to

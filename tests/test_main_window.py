@@ -252,6 +252,44 @@ async def test_section_field_boxed_red_invalid_green_new_none_valid():
     assert section.styleSheet() == ""
 
 
+def test_space_and_tab_walk_the_qso_entry_fields():
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    w = _window()
+    w.show()
+    w.activateWindow()
+    app.processEvents()
+
+    def press(key, mods=Qt.KeyboardModifier.NoModifier):
+        consumed = w.eventFilter(app.focusWidget(), QKeyEvent(QEvent.Type.KeyPress, key, mods))
+        app.processEvents()
+        return consumed
+
+    call, section = w._call, w._exchange_edits["section"]
+    klass = w._exchange_edits["class"]
+
+    call.setFocus()
+    app.processEvents()
+    assert app.focusWidget() is call
+    assert press(Qt.Key.Key_Space) is True  # Space advances...
+    assert app.focusWidget() is klass
+    assert press(Qt.Key.Key_Tab) is True  # ...so does Tab
+    assert app.focusWidget() is section
+    # Last field doesn't wrap.
+    assert press(Qt.Key.Key_Space) is True
+    assert app.focusWidget() is section
+    # Shift+Tab walks back.
+    assert press(Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier) is True
+    assert app.focusWidget() is klass
+    # A normal character is left alone.
+    letter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_A, Qt.KeyboardModifier.NoModifier)
+    assert w.eventFilter(klass, letter) is False
+    w.close()
+
+
 def test_log_button_label_is_just_log():
     w = _window()
     from PySide6.QtWidgets import QPushButton
