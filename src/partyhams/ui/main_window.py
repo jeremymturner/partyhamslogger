@@ -1586,7 +1586,6 @@ class MainWindow(QMainWindow):
 
     def _update_score_bar(self) -> None:
         s = self.session.score()
-        mult = s.breakdown.get("power_multiplier", 1)
         peers = len(self.session.peers)
         peer_txt = (
             f" &nbsp;|&nbsp; Peers <b style='color:{style.PEER}'>{peers}</b>" if peers else ""
@@ -1605,9 +1604,7 @@ class MainWindow(QMainWindow):
             f"<b style='color:{style.ACCENT}'>{call}</b>{op_txt} &nbsp;·&nbsp; {name} "
             f"&nbsp;|&nbsp; "
             f"QSOs <b style='color:{style.TEXT}'>{s.qso_count}</b> &nbsp; "
-            f"Pts <b style='color:{style.TEXT}'>{s.qso_points}</b> &nbsp; "
             f"{mult_label} <b style='color:{style.MULT}'>{s.mult_count}</b> &nbsp; "
-            f"Pwr <b style='color:{style.AMBER}'>×{mult}</b> &nbsp; "
             f"Score <b style='color:{style.AMBER}'>{s.total}</b>{peer_txt}"
         )
 
