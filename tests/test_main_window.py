@@ -149,6 +149,48 @@ async def test_delete_qso_via_row():
     assert s.qsos() == []
 
 
+async def test_log_rows_colored_by_operator_not_station_id():
+    from dataclasses import replace
+
+    from PySide6.QtGui import QColor
+
+    from partyhams.ui import style
+
+    w = _window()
+    s = w.session
+    me = s.engine.operator  # this op (W7ABC)
+    mine = await s.log_qso(
+        call="K1ABC", freq_hz=14_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    # A peer QSO from a different operator (and different station_id).
+    peer = replace(
+        mine, uuid="peer-1", call="W2XYZ", operator="N0AW", station_id="other", lamport=99
+    )
+    s.engine.log.apply(peer)
+    s._rebuild_indexes()
+    w.refresh()
+
+    # Row 0 is newest; find each row's color by call.
+    colors = {}
+    for row in range(w._table.rowCount()):
+        call = w._table.item(row, 1).text()
+        colors[call] = w._table.item(row, 1).foreground().color()
+    peer_color = QColor(style.PEER)
+    assert colors["W2XYZ"] == peer_color  # other operator -> blue
+    assert colors["K1ABC"] != peer_color  # my operator -> default (white)
+    assert me == "W7ABC"
+
+    # Simulating a reopen: the station_id changes, but coloring keys on operator,
+    # so my own QSO stays white (the bug was everything turning blue here).
+    s.engine.station_id = "brand-new-session-id"
+    w.refresh()
+    again = {
+        w._table.item(r, 1).text(): w._table.item(r, 1).foreground().color()
+        for r in range(w._table.rowCount())
+    }
+    assert again["K1ABC"] != peer_color  # still white after the station_id change
+
+
 def test_fkey_bar_only_visible_for_cw_and_ssb():
     w = _window()
     for mode in (Mode.CW, Mode.USB, Mode.LSB):

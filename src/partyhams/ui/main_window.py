@@ -1635,7 +1635,7 @@ class MainWindow(QMainWindow):
             qsos = list(reversed(self.session.recent(200)))  # newest first
         self._row_qsos = qsos  # row index -> QSO (for edit/delete)
         self._table.setRowCount(len(qsos))
-        local_station = self.session.engine.station_id
+        current_op = self.session.engine.operator.upper()
         for row, q in enumerate(qsos):
             exchange = " ".join(
                 q.exchange_rcvd.get(f.name, "") for f in self.session.contest.exchange_fields()
@@ -1644,7 +1644,9 @@ class MainWindow(QMainWindow):
             if self.session.contest.exchanges_rst:
                 values += [q.rst_sent, q.rst_rcvd]
             values += [exchange.strip(), q.operator]
-            is_peer = q.station_id != local_station  # logged at another station
+            # White = this operator's own QSOs; blue = another operator's. Keyed on
+            # the (persisted) operator call so it stays correct after a reopen.
+            is_peer = q.operator.upper() != current_op
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)
                 if is_peer:

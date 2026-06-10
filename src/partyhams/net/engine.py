@@ -160,6 +160,7 @@ class SyncEngine:
             uuid=new_uuid(),
             station_id=self.station_id,
             operator=self.operator,
+            station_callsign=self.call,
             lamport=self.clock.tick(),
             call=call.upper(),
             freq_hz=freq_hz,

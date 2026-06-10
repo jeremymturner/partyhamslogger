@@ -88,9 +88,12 @@ def qso_to_adif(qso: QSO, config: ContestConfig) -> str:
     parts.append(_field("MODE", adif_mode))
     if adif_submode:
         parts.append(_field("SUBMODE", adif_submode))
+    # Per-QSO station call (who the QSO was logged under), falling back to the
+    # log's own call for records logged before the field existed.
+    station_call = (qso.station_callsign or config.my_call).upper()
     parts += [
         _field("OPERATOR", qso.operator.upper()),
-        _field("STATION_CALLSIGN", config.my_call.upper()),
+        _field("STATION_CALLSIGN", station_call),
     ]
     if qso.rst_sent:
         parts.append(_field("RST_SENT", qso.rst_sent))

@@ -29,6 +29,7 @@ def qso_to_wire(qso: QSO) -> dict:
         "uuid": qso.uuid,
         "station_id": qso.station_id,
         "operator": qso.operator,
+        "station_callsign": qso.station_callsign,
         "lamport": qso.lamport,
         "deleted": qso.deleted,
         "call": qso.call,
@@ -48,6 +49,7 @@ def qso_from_wire(d: dict) -> QSO:
         uuid=d["uuid"],
         station_id=d["station_id"],
         operator=d["operator"],
+        station_callsign=d.get("station_callsign", ""),  # older peers omit it
         lamport=d["lamport"],
         deleted=d["deleted"],
         call=d["call"],

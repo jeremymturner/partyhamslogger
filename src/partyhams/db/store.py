@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS qso (
     uuid           TEXT PRIMARY KEY,
     station_id     TEXT NOT NULL,
     operator       TEXT NOT NULL,
+    station_callsign TEXT NOT NULL DEFAULT '',
     lamport        INTEGER NOT NULL,
     deleted        INTEGER NOT NULL DEFAULT 0,
     call           TEXT NOT NULL,
@@ -61,7 +62,16 @@ class SqliteLog:
         self._conn = sqlite3.connect(str(path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a log file was first created."""
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(qso)")}
+        if "station_callsign" not in cols:
+            self._conn.execute(
+                "ALTER TABLE qso ADD COLUMN station_callsign TEXT NOT NULL DEFAULT ''"
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -93,14 +103,15 @@ class SqliteLog:
                 return False
         self._conn.execute(
             """
-            INSERT INTO qso (uuid, station_id, operator, lamport, deleted, call,
-                             timestamp, freq_hz, mode, rst_sent, rst_rcvd,
-                             serial_sent, exchange_rcvd, exchange_sent)
-            VALUES (:uuid, :station_id, :operator, :lamport, :deleted, :call,
-                    :timestamp, :freq_hz, :mode, :rst_sent, :rst_rcvd,
-                    :serial_sent, :exchange_rcvd, :exchange_sent)
+            INSERT INTO qso (uuid, station_id, operator, station_callsign, lamport,
+                             deleted, call, timestamp, freq_hz, mode, rst_sent,
+                             rst_rcvd, serial_sent, exchange_rcvd, exchange_sent)
+            VALUES (:uuid, :station_id, :operator, :station_callsign, :lamport,
+                    :deleted, :call, :timestamp, :freq_hz, :mode, :rst_sent,
+                    :rst_rcvd, :serial_sent, :exchange_rcvd, :exchange_sent)
             ON CONFLICT(uuid) DO UPDATE SET
                 station_id=excluded.station_id, operator=excluded.operator,
+                station_callsign=excluded.station_callsign,
                 lamport=excluded.lamport, deleted=excluded.deleted,
                 call=excluded.call, timestamp=excluded.timestamp,
                 freq_hz=excluded.freq_hz, mode=excluded.mode,
@@ -153,6 +164,7 @@ class SqliteLog:
             "uuid": q.uuid,
             "station_id": q.station_id,
             "operator": q.operator,
+            "station_callsign": q.station_callsign,
             "lamport": q.lamport,
             "deleted": int(q.deleted),
             "call": q.call,
@@ -172,6 +184,7 @@ class SqliteLog:
             uuid=r["uuid"],
             station_id=r["station_id"],
             operator=r["operator"],
+            station_callsign=r["station_callsign"],
             lamport=r["lamport"],
             deleted=bool(r["deleted"]),
             call=r["call"],

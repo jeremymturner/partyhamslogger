@@ -118,8 +118,9 @@ class QSO:
 
     # --- identity & merge metadata ---
     uuid: str
-    station_id: str
-    operator: str
+    station_id: str  # the logging machine's per-session sync id (merge tiebreak)
+    operator: str  # ADIF OPERATOR: the individual at the key (e.g. N0AW)
+    station_callsign: str = ""  # ADIF STATION_CALLSIGN: the station call (e.g. W0CPH)
     lamport: int = 0
     deleted: bool = False
 

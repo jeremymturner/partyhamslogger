@@ -28,6 +28,8 @@ def test_qso_message_roundtrip():
     assert decoded.qso.mode is Mode.USB
     assert decoded.qso.exchange_rcvd == q.exchange_rcvd
     assert decoded.qso.timestamp == q.timestamp
+    assert decoded.qso.operator == q.operator
+    assert decoded.qso.station_callsign == q.station_callsign  # carried over the wire
 
 
 def test_hello_roundtrip():
