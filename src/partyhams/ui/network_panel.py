@@ -37,6 +37,27 @@ from partyhams.app.session import LogSession
 from partyhams.ui import style
 
 _COLUMNS = ["Op", "Freq", "Mode", "15m", "60m", "All"]
+#: Relative column widths — the roster scales these proportionally to the dock
+#: width (rather than dumping all slack into the last column).
+_COL_WEIGHTS = (72, 62, 44, 44, 44, 44)
+
+
+class _RosterTable(QTableWidget):
+    """Stations roster whose columns grow and shrink proportionally with the dock,
+    so no single column (e.g. "All") balloons to absorb the slack."""
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        avail = self.viewport().width()
+        if avail <= 0 or self.columnCount() != len(_COL_WEIGHTS):
+            return
+        total = sum(_COL_WEIGHTS)
+        used = 0
+        for col in range(self.columnCount() - 1):
+            w = round(_COL_WEIGHTS[col] / total * avail)
+            self.setColumnWidth(col, w)
+            used += w
+        self.setColumnWidth(self.columnCount() - 1, max(0, avail - used))  # exact fill
 
 
 def _fmt_freq(freq_hz: int) -> str:
@@ -148,24 +169,21 @@ class NetworkPanel(QWidget):
         self._sync_btn.clicked.connect(self._request_sync)
         header.addWidget(self._sync_btn)
         sv.addLayout(header)
-        self._table = QTableWidget(0, len(_COLUMNS))
+        self._table = _RosterTable(0, len(_COLUMNS))
         self._table.setHorizontalHeaderLabels(_COLUMNS)
         self._table.verticalHeader().setVisible(False)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self._table.setShowGrid(False)
-        # Columns are user-resizable: drag a column border to widen/narrow it, and
-        # drag the dock's edge for more room (the last column takes up the slack).
-        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        # Columns scale proportionally with the dock width (see _RosterTable); none
+        # absorbs the slack on its own. Fixed mode so that scaling isn't overridden.
+        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         header = self._table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         header.setMinimumSectionSize(24)
         self._table.setStyleSheet(
             "QHeaderView::section { padding: 4px 2px; }QTableWidget::item { padding: 2px 4px; }"
         )
-        for col, width in enumerate((72, 62, 44, 38, 38, 38)):
-            self._table.setColumnWidth(col, width)
         # Click a row to drill into that station's stats.
         self._table.cellClicked.connect(self._on_row_clicked)
         self._table.setCursor(Qt.CursorShape.PointingHandCursor)

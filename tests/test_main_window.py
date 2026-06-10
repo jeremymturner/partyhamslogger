@@ -290,6 +290,34 @@ def test_space_and_tab_walk_the_qso_entry_fields():
     w.close()
 
 
+def test_roster_table_columns_scale_proportionally():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.network_panel import _COL_WEIGHTS, _COLUMNS, _RosterTable
+
+    app = QApplication.instance() or QApplication([])
+    table = _RosterTable(0, len(_COLUMNS))
+    table.setHorizontalHeaderLabels(_COLUMNS)
+    table.verticalHeader().setVisible(False)
+    table.show()
+
+    widths_by_panel = {}
+    for panel_w in (260, 380):
+        table.setFixedWidth(panel_w)
+        table.resize(panel_w, 200)
+        app.processEvents()
+        widths_by_panel[panel_w] = [table.columnWidth(c) for c in range(table.columnCount())]
+        # Columns fill the viewport exactly — nothing absorbs the slack on its own.
+        assert sum(widths_by_panel[panel_w]) == table.viewport().width()
+
+    narrow, wide = widths_by_panel[260], widths_by_panel[380]
+    # Every column grows when the panel widens (not just the last one).
+    assert all(w >= n for w, n in zip(wide, narrow, strict=True))
+    # The last column ("All") is never the widest — Op/Freq lead, per the weights.
+    assert wide[-1] <= wide[0] and _COL_WEIGHTS[-1] <= _COL_WEIGHTS[0]
+    table.close()
+
+
 def test_log_button_label_is_just_log():
     w = _window()
     from PySide6.QtWidgets import QPushButton
