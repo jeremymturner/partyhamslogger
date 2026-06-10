@@ -195,14 +195,15 @@ class MainWindow(QMainWindow):
         self._wsjtx_listener: WsjtxListener | None = None
         self._wsjtx_enabled = False
         self._wsjtx_port = 2237
+        self._wsjtx_host = ""  # "" = all interfaces; a multicast group is joined
         self._wsjtx_active = False
         # The exact data sub-mode WSJT-X reports (FT8 vs FT4). A CAT rig only knows
         # "data/USB" (read back as FT8), so while WSJT-X is active its mode wins.
         self._wsjtx_mode: Mode | None = None
         self._wsjtx_id = ""  # the reporting WSJT-X instance id (for replies)
         self._wsjtx_highlighted: set[str] = set()  # calls we've already colored
-        #: Set by the app: on_change_wsjtx(enabled, port) persists the choice.
-        self.on_change_wsjtx: Callable[[bool, int], None] | None = None
+        #: Set by the app: on_change_wsjtx(enabled, port, host) persists the choice.
+        self.on_change_wsjtx: Callable[[bool, int, str], None] | None = None
         try:
             self._loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -820,18 +821,22 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Auto-CQ interval {self._autocq_interval}s", 2000)
 
     def _build_wsjtx_menu(self) -> None:
-        """The WSJT-X menu: toggle the UDP listener and set its port."""
+        """The WSJT-X menu: toggle the UDP listener and set its server + port."""
         menu = self.menuBar().addMenu("WSJT-X")
         self._wsjtx_action = menu.addAction("Enable WSJT-X (UDP)")
         self._wsjtx_action.setCheckable(True)
         self._wsjtx_action.toggled.connect(self._toggle_wsjtx)
+        menu.addAction("Set UDP Server…", self._choose_wsjtx_host)
         menu.addAction("Set UDP Port…", self._choose_wsjtx_port)
 
     def _toggle_wsjtx(self, enabled: bool) -> None:
         """Enable/disable the listener (menu handler) and persist the choice."""
-        self.set_wsjtx(enabled, self._wsjtx_port)
+        self.set_wsjtx(enabled, self._wsjtx_port, self._wsjtx_host)
+        self._persist_wsjtx()
+
+    def _persist_wsjtx(self) -> None:
         if self.on_change_wsjtx is not None:
-            self.on_change_wsjtx(self._wsjtx_enabled, self._wsjtx_port)
+            self.on_change_wsjtx(self._wsjtx_enabled, self._wsjtx_port, self._wsjtx_host)
 
     def _choose_wsjtx_port(self) -> None:
         from PySide6.QtWidgets import QInputDialog
@@ -839,17 +844,36 @@ class MainWindow(QMainWindow):
         port, ok = QInputDialog.getInt(self, "WSJT-X UDP Port", "Port:", self._wsjtx_port, 1, 65535)
         if not ok:
             return
-        self.set_wsjtx(self._wsjtx_enabled, port)
-        if self.on_change_wsjtx is not None:
-            self.on_change_wsjtx(self._wsjtx_enabled, self._wsjtx_port)
+        self.set_wsjtx(self._wsjtx_enabled, port, self._wsjtx_host)
+        self._persist_wsjtx()
 
-    def set_wsjtx(self, enabled: bool, port: int) -> None:
+    def _choose_wsjtx_host(self) -> None:
+        """Set the address WSJT-X's UDP Server sends to. Blank = all interfaces;
+        a multicast group (e.g. 224.0.0.1) is joined so multicast reaches us."""
+        from PySide6.QtWidgets import QInputDialog
+
+        host, ok = QInputDialog.getText(
+            self,
+            "WSJT-X UDP Server",
+            "Server address — blank for all interfaces, or a multicast\n"
+            "group (224.0.0.1–239.255.255.255) to join it:",
+            text=self._wsjtx_host,
+        )
+        if not ok:
+            return
+        self.set_wsjtx(self._wsjtx_enabled, self._wsjtx_port, host.strip())
+        self._persist_wsjtx()
+
+    def set_wsjtx(self, enabled: bool, port: int, host: str = "") -> None:
         """Apply WSJT-X settings: (re)start or stop the UDP listener.
 
+        ``host`` is the address WSJT-X's UDP Server targets: "" binds all
+        interfaces (unicast); a multicast group is joined so multicast reaches us.
         Idempotent and safe without a running loop (tests): when there's no
         asyncio loop the settings are stored but no socket is opened.
         """
         self._wsjtx_port = int(port)
+        self._wsjtx_host = host or ""
         self._wsjtx_enabled = bool(enabled)
         if hasattr(self, "_wsjtx_action"):
             self._wsjtx_action.setChecked(self._wsjtx_enabled)
@@ -873,6 +897,7 @@ class MainWindow(QMainWindow):
             return
         listener = WsjtxListener(
             port=self._wsjtx_port,
+            host=self._wsjtx_host,
             on_qso_logged=self._on_wsjtx_qso,
             on_status=self._on_wsjtx_status,
             on_decode=self._on_wsjtx_decode,
@@ -883,7 +908,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"WSJT-X listen failed: {exc}", 5000)
             return
         self._wsjtx_listener = listener
-        self.statusBar().showMessage(f"WSJT-X UDP listening on :{self._wsjtx_port}", 3000)
+        where = f"{self._wsjtx_host}:" if self._wsjtx_host else ":"
+        self.statusBar().showMessage(f"WSJT-X UDP listening on {where}{self._wsjtx_port}", 3000)
 
     # --- WSJT-X message handlers (called from the asyncio thread) ---
     def _on_wsjtx_qso(self, msg: QSOLogged) -> None:

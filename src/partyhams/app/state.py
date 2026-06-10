@@ -49,6 +49,9 @@ class AppState:
     wsjtx_enabled: bool = False
     #: UDP port WSJT-X reports to (WSJT-X default is 2237).
     wsjtx_port: int = 2237
+    #: Address WSJT-X's "UDP Server" sends to. "" = bind all interfaces (unicast);
+    #: a multicast group (224.0.0.0–239.255.255.255, e.g. 224.0.0.1) is joined.
+    wsjtx_host: str = ""
     #: QRZ.com XML-API credentials for callsign lookups (empty => disabled).
     qrz_username: str = ""
     qrz_password: str = ""
@@ -72,6 +75,7 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         autoexport_only_if_new=data.get("autoexport_only_if_new", True),
         wsjtx_enabled=data.get("wsjtx_enabled", False),
         wsjtx_port=data.get("wsjtx_port", 2237),
+        wsjtx_host=data.get("wsjtx_host", ""),
         qrz_username=data.get("qrz_username", ""),
         qrz_password=data.get("qrz_password", ""),
     )
@@ -92,6 +96,7 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "autoexport_only_if_new": state.autoexport_only_if_new,
         "wsjtx_enabled": state.wsjtx_enabled,
         "wsjtx_port": state.wsjtx_port,
+        "wsjtx_host": state.wsjtx_host,
         "qrz_username": state.qrz_username,
         "qrz_password": state.qrz_password,
     }

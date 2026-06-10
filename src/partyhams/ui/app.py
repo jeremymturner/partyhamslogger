@@ -203,7 +203,7 @@ def run() -> int:
                 state.autoexport_only_if_new,
             )
             window.on_change_wsjtx = _change_wsjtx
-            window.set_wsjtx(state.wsjtx_enabled, state.wsjtx_port)
+            window.set_wsjtx(state.wsjtx_enabled, state.wsjtx_port, state.wsjtx_host)
             window.on_change_qrz = _change_qrz
             window.set_qrz_credentials(state.qrz_username, state.qrz_password)
             window.show()
@@ -314,9 +314,10 @@ def run() -> int:
         save_state(state)
 
     # --- WSJT-X UDP settings (live + persisted) ---
-    def _change_wsjtx(enabled: bool, port: int) -> None:
+    def _change_wsjtx(enabled: bool, port: int, host: str = "") -> None:
         state.wsjtx_enabled = enabled
         state.wsjtx_port = port
+        state.wsjtx_host = host
         save_state(state)
 
     # --- QRZ credentials (persisted) ---

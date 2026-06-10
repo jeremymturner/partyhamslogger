@@ -42,9 +42,11 @@ Rig or Fake It** and PTT method in WSJT-X → Settings → Radio.
 
 In **WSJT-X → Settings → Reporting → UDP Server**:
 
-- **UDP Server:** the host running PartyHams. On the same machine use
-  `127.0.0.1`. For a multicast group (e.g. `239.255.0.0`) PartyHams will join it
-  if you set the same group as its listen host.
+- **UDP Server:** the host running PartyHams. On the same machine, `127.0.0.1`
+  is the simplest choice. A multicast group (`224.0.0.1`–`239.255.255.255`, e.g.
+  to feed several apps at once) also works — set the **same** group as
+  PartyHams' UDP Server (below) so PartyHams joins it; otherwise it won't receive
+  the multicast traffic.
 - **UDP Server port number:** `2237` (PartyHams' default — change both if needed).
 - Tick **Accept UDP requests** — required for the "highlight needed sections"
   feature (the `HighlightCallsignInProgram` reply).
@@ -59,6 +61,9 @@ them — they don't affect PartyHams.
 In PartyHams Logger, open the **WSJT-X** menu:
 
 - **Enable WSJT-X (UDP)** — starts/stops the listener. The choice is remembered.
+- **Set UDP Server…** — the address to bind: blank for all interfaces (the
+  default, fine for `127.0.0.1` unicast), or a multicast group to join (set this
+  to match WSJT-X's UDP Server when you use multicast).
 - **Set UDP Port…** — change the listen port if you didn't use `2237`.
 
 When enabled you'll see `WSJT-X UDP listening on :2237` in the status bar. As

@@ -422,6 +422,35 @@ async def test_listener_dispatches_and_records_peer():
 
 
 @pytest.mark.asyncio
+async def test_listener_joins_multicast_group():
+    """When the host is a multicast group, the listener joins it and receives
+    datagrams sent to that group (WSJT-X's UDP Server can target e.g. 224.0.0.1)."""
+    import socket
+
+    group, port = "224.0.0.1", 22372
+    received: list[QSOLogged] = []
+    listener = WsjtxListener(port=port, host=group, on_qso_logged=received.append)
+    try:
+        await listener.start()
+    except OSError as exc:  # no multicast in this environment -> skip
+        pytest.skip(f"multicast unavailable: {exc}")
+    try:
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sender.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+        sender.sendto(_qso_logged_bytes(), (group, port))
+        for _ in range(50):
+            if received:
+                break
+            await asyncio.sleep(0.01)
+        sender.close()
+    finally:
+        await listener.stop()
+    if not received:
+        pytest.skip("multicast not delivered in this environment")
+    assert received[0].dx_call == "K1ABC"
+
+
+@pytest.mark.asyncio
 async def test_listener_callback_exception_is_swallowed():
     def boom(_msg):
         raise RuntimeError("handler blew up")
