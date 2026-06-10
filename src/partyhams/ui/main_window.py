@@ -756,6 +756,8 @@ class MainWindow(QMainWindow):
         cabrillo = logs_menu.addAction("Export Cabrillo…", self._export_cabrillo)
         cabrillo.setShortcut(QKeySequence(sc.EXPORT_CABRILLO))
         logs_menu.addAction("Auto-export…", self._edit_autoexport)
+        logs_menu.addSeparator()
+        logs_menu.addAction("QRZ Login…", self._edit_qrz)
 
         radio_menu = self.menuBar().addMenu("Radio")
         select_radio = radio_menu.addAction("Select Radio…", self._radio_menu_clicked)
@@ -787,8 +789,6 @@ class MainWindow(QMainWindow):
         font.setStatusTip("Set the app-wide base font family and size")
 
         tools_menu = self.menuBar().addMenu("Tools")
-        tools_menu.addAction("QRZ Login…", self._edit_qrz)
-        tools_menu.addSeparator()
         ref_menu = tools_menu.addMenu("Reference Data")
         ref_menu.addAction("Import Super Check Partial…", self._import_scp)
         ref_menu.addAction("Import city.dat…", self._import_city)
