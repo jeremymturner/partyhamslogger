@@ -290,6 +290,84 @@ def test_space_and_tab_walk_the_qso_entry_fields():
     w.close()
 
 
+def test_roster_mode_tags_ft8_ft4_even_odd():
+    from partyhams.ui.network_panel import _fmt_mode
+
+    assert _fmt_mode("FT8", 1) == "FT8e"  # even sequence
+    assert _fmt_mode("FT8", 0) == "FT8o"  # odd sequence
+    assert _fmt_mode("FT4", 1) == "FT4e"
+    assert _fmt_mode("FT4", 0) == "FT4o"
+    assert _fmt_mode("FT8", -1) == "FT8"  # unknown sequence -> no tag
+    assert _fmt_mode("CW", 1) == "CW"  # only FT8/FT4 get tagged
+    assert _fmt_mode("", -1) == "—"
+
+
+def test_chat_is_broadcast_only_and_tags_by_op_callsign():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.network_panel import NetworkPanel
+
+    QApplication.instance() or QApplication([])
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W0CPH",
+        operator="N0AW",
+        sent_exchange={"class": "2A", "section": "OR"},
+        network=None,
+        db_path=":memory:",
+    )
+    panel = NetworkPanel(s)
+    assert not hasattr(panel, "_recipient")  # the direct-message selector is gone
+
+    sent = []
+    panel.on_send_chat = lambda to, txt: sent.append((to, txt))
+    panel._input.setText("hello all")
+    panel._send()
+    assert sent == [("*", "hello all")]  # always broadcast
+
+    # The op callsign is the nick for both incoming and outgoing.
+    panel.append_chat({"from_op": "W0AEZ", "to_op": "*", "text": "hi", "ts": "t", "incoming": True})
+    panel.append_chat({"from_op": "N0AW", "to_op": "*", "text": "yo", "ts": "t", "incoming": False})
+    body = panel._chat_view.toPlainText()
+    assert "W0AEZ:" in body and "N0AW:" in body
+
+
+def test_chat_tab_completes_and_cycles_roster_callsigns():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.network_panel import NetworkPanel
+
+    QApplication.instance() or QApplication([])
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W0CPH",
+        sent_exchange={"class": "2A", "section": "OR"},
+        network=None,
+        db_path=":memory:",
+    )
+    panel = NetworkPanel(s)
+    panel._roster_rows = [{"operator": "W0AEZ"}, {"operator": "W0ABC"}, {"operator": "K1XYZ"}]
+
+    panel._input.setText("W0A")
+    panel._complete_callsign()
+    first = panel._input.text()
+    panel._complete_callsign()
+    second = panel._input.text()
+    assert {first, second} == {"W0ABC", "W0AEZ"}  # cycles through both W0A* matches
+    panel._complete_callsign()
+    assert panel._input.text() == first  # wraps around
+
+    # Completes the last word in a sentence.
+    panel._input.setText("hey K1")
+    panel._complete_callsign()
+    assert panel._input.text() == "hey K1XYZ"
+
+    # No match leaves the text untouched.
+    panel._input.setText("ZZ")
+    panel._complete_callsign()
+    assert panel._input.text() == "ZZ"
+
+
 def test_roster_table_columns_scale_proportionally():
     from PySide6.QtWidgets import QApplication
 

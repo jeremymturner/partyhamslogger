@@ -15,15 +15,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QEvent, QRect, Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
-    QComboBox,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QStackedWidget,
     QTableWidget,
@@ -62,6 +63,15 @@ class _RosterTable(QTableWidget):
 
 def _fmt_freq(freq_hz: int) -> str:
     return f"{freq_hz / 1_000_000:.3f}" if freq_hz else "—"
+
+
+def _fmt_mode(mode: str, ft_tx_even: int) -> str:
+    """Mode for the roster, tagging the FT8/FT4 Tx sequence: ``FT8e`` (even) /
+    ``FT8o`` (odd). ``ft_tx_even`` is 1 even, 0 odd, -1 unknown."""
+    m = (mode or "").upper()
+    if m in ("FT8", "FT4") and ft_tx_even in (0, 1):
+        return f"{m}{'e' if ft_tx_even == 1 else 'o'}"
+    return mode or "—"
 
 
 def _radio_line(row: dict | None) -> str:
@@ -152,7 +162,9 @@ class NetworkPanel(QWidget):
         self.on_send_chat: Callable[[str, str], None] | None = None
         #: Wired by the main window: ask every peer for their full log.
         self.on_request_sync: Callable[[], None] | None = None
-        self._known_ops: list[str] = []
+        # Tab-completion state for the chat input (roster callsigns).
+        self._cc_matches: list[str] = []
+        self._cc_index = 0
         self.setMinimumWidth(200)  # generous lower bound; drag the dock edge to resize
 
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -188,13 +200,20 @@ class NetworkPanel(QWidget):
         self._table.cellClicked.connect(self._on_row_clicked)
         self._table.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Stack: page 0 = roster table, page 1 = the per-station stats view.
+        # Stack: page 0 = roster table, page 1 = the per-station stats view. The
+        # stats view is scrollable so its tall content doesn't force a big minimum
+        # height on the roster pane — that lets the chat be dragged up to ~75%.
         self._stack = QStackedWidget()
         self._stack.addWidget(self._table)
-        self._stack.addWidget(self._build_stats_view())
+        stats_scroll = QScrollArea()
+        stats_scroll.setWidgetResizable(True)
+        stats_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        stats_scroll.setWidget(self._build_stats_view())
+        self._stack.addWidget(stats_scroll)
         sv.addWidget(self._stack)
         self._roster_rows: list[dict] = []
         self._stats_station_id: str | None = None
+        stations.setMinimumHeight(110)  # roster floor; below this it collapses (chat 100%)
         splitter.addWidget(stations)
 
         # --- chat ---
@@ -207,16 +226,12 @@ class NetworkPanel(QWidget):
         self._chat_view.setReadOnly(True)
         cv.addWidget(self._chat_view, stretch=1)
 
-        row = QHBoxLayout()
-        self._recipient = QComboBox()
-        self._recipient.addItem("Everyone", "*")
-        self._recipient.setMinimumWidth(110)
+        # Chat is broadcast-only: everyone talks to everyone, tagged by op call.
         self._input = QLineEdit()
-        self._input.setPlaceholderText("Message… (Enter to send)")
+        self._input.setPlaceholderText("Message everyone… (Enter to send, Tab completes calls)")
         self._input.returnPressed.connect(self._send)
-        row.addWidget(self._recipient)
-        row.addWidget(self._input, stretch=1)
-        cv.addLayout(row)
+        self._input.installEventFilter(self)  # Tab -> callsign completion
+        cv.addWidget(self._input)
         splitter.addWidget(chat)
 
         splitter.setSizes([320, 240])
@@ -315,7 +330,7 @@ class NetworkPanel(QWidget):
             values = [
                 f"⏰ {op}" if clock_off else op,  # clock-drift marker on the Op cell
                 _fmt_freq(r["freq_hz"]),
-                r["mode"] or "—",
+                _fmt_mode(r["mode"], r["ft_tx_even"]),
                 str(rates[15]),
                 str(rates[60]),
                 str(r["total"]),  # total QSOs by this station across the whole log
@@ -337,49 +352,64 @@ class NetworkPanel(QWidget):
                     )
                 self._table.setItem(i, col, item)
 
-        ops = self.session.operators()
-        if ops != self._known_ops:
-            self._known_ops = ops
-            self._rebuild_recipients(ops)
-
-    def _rebuild_recipients(self, ops: list[str]) -> None:
-        current = self._recipient.currentData()
-        self._recipient.blockSignals(True)
-        self._recipient.clear()
-        self._recipient.addItem("Everyone", "*")
-        for op in ops:
-            self._recipient.addItem(op, op)
-        idx = self._recipient.findData(current)
-        self._recipient.setCurrentIndex(idx if idx >= 0 else 0)
-        self._recipient.blockSignals(False)
-
     # ------------------------------------------------------------------ #
     # chat
     # ------------------------------------------------------------------ #
     def append_chat(self, entry: dict) -> None:
-        to_op = entry["to_op"]
-        target = "all" if to_op in ("", "*") else to_op
         when = _short_time(entry["ts"])
-        if entry["incoming"]:
-            who = entry["from_op"]
-            color = style.PEER
-            arrow = "" if target == "all" else " →you"
-            header = f"{who}{arrow}"
-        else:
-            color = style.MULT if target == "all" else style.AMBER
-            header = f"you→{target}"
+        who = entry["from_op"]  # the op callsign is the nick
+        color = style.PEER if entry["incoming"] else style.MULT
         text = entry["text"].replace("<", "&lt;").replace(">", "&gt;")
         self._chat_view.append(
             f"<span style='color:{style.TEXT_DIM}'>{when}</span> "
-            f"<b style='color:{color}'>{header}:</b> {text}"
+            f"<b style='color:{color}'>{who}:</b> {text}"
         )
 
     def _send(self) -> None:
         text = self._input.text().strip()
         if not text or self.on_send_chat is None:
             return
-        self.on_send_chat(self._recipient.currentData(), text)
+        self.on_send_chat("*", text)  # broadcast to everyone
         self._input.clear()
+
+    # ------------------------------------------------------------------ #
+    # chat callsign completion (Tab)
+    # ------------------------------------------------------------------ #
+    def eventFilter(self, obj: object, event: QEvent) -> bool:
+        if (
+            obj is self._input
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Tab
+        ):
+            self._complete_callsign()
+            return True  # consume Tab (don't move focus / insert a tab)
+        return super().eventFilter(obj, event)
+
+    def _roster_calls(self) -> list[str]:
+        """Distinct op callsigns currently on the roster (for chat completion)."""
+        calls: list[str] = []
+        for r in self._roster_rows:
+            op = (r.get("operator") or "").strip().upper()
+            if op and op not in calls:
+                calls.append(op)
+        return sorted(calls)
+
+    def _complete_callsign(self) -> None:
+        """Tab-complete the last word in the chat box against roster callsigns;
+        repeated Tab cycles through all matches for that prefix."""
+        text = self._input.text()
+        frag = text.rpartition(" ")[2]  # the word being typed
+        head = text[: len(text) - len(frag)]
+        # Continue the current cycle if the box still shows the last completion.
+        if self._cc_matches and frag == self._cc_matches[self._cc_index]:
+            self._cc_index = (self._cc_index + 1) % len(self._cc_matches)
+        else:
+            self._cc_matches = [c for c in self._roster_calls() if c.startswith(frag.upper())]
+            self._cc_index = 0
+            if not self._cc_matches:
+                return
+        self._input.setText(head + self._cc_matches[self._cc_index])
+        self._input.setCursorPosition(len(self._input.text()))
 
     def _request_sync(self) -> None:
         if self.on_request_sync is not None:
