@@ -36,6 +36,47 @@ def _set_mode(w, mode: Mode) -> None:
     w._mode.setCurrentIndex(w._mode.findData(mode))
 
 
+def _table_calls(w) -> list[str]:
+    return [w._table.item(r, 1).text() for r in range(w._table.rowCount())]
+
+
+async def test_dupe_filters_log_to_that_call_and_clears():
+    w = _window()
+    s = w.session
+    await s.log_qso(
+        call="K1ABC", freq_hz=14_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    await s.log_qso(
+        call="W2XYZ", freq_hz=14_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "NM"}
+    )
+    await s.log_qso(
+        call="K1ABC", freq_hz=7_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    w.refresh()
+    assert _table_calls(w) == ["K1ABC", "W2XYZ", "K1ABC"]
+
+    # Typing a dupe call filters the log to every QSO with that call.
+    _set_mode(w, Mode.CW)
+    w._band.setCurrentText("20m")
+    w._call.setText("K1ABC")
+    w._refresh_indicators()
+    assert w._status_badge.text() == "DUPE"
+    assert w._call_filter == "K1ABC"
+    assert _table_calls(w) == ["K1ABC", "K1ABC"]
+
+    # Clearing the call field removes the filter.
+    w._call.setText("")
+    w._refresh_indicators()
+    assert w._call_filter == ""
+    assert _table_calls(w) == ["K1ABC", "W2XYZ", "K1ABC"]
+
+    # A call that isn't a dupe doesn't filter.
+    w._call.setText("N0NEW")
+    w._refresh_indicators()
+    assert w._call_filter == ""
+    assert _table_calls(w) == ["K1ABC", "W2XYZ", "K1ABC"]
+
+
 def test_fkey_bar_only_visible_for_cw_and_ssb():
     w = _window()
     for mode in (Mode.CW, Mode.USB, Mode.LSB):

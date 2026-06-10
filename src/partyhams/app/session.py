@@ -401,17 +401,9 @@ class LogSession:
         return self.contest.dupe_key(probe) in self._dupe_keys
 
     def dupe_label(self, call: str, freq_hz: int, mode: Mode) -> str:
-        """Human-readable dupe message, or ``""`` if it is not a dupe.
-
-        e.g. ``"DUPE — already worked on 20m CW"`` describing the slot (band +
-        mode-group) that would collide.
-        """
-        if not self.is_dupe(call, freq_hz, mode):
-            return ""
-        probe = QSO(
-            uuid="", station_id="", operator="", call=call.upper(), freq_hz=freq_hz, mode=mode
-        )
-        return f"DUPE — already worked on {probe.band_label} {probe.mode_group.value}"
+        """``"DUPE"`` if working ``call`` now would duplicate a QSO already in the
+        (network-wide) log for this slot, else ``""``."""
+        return "DUPE" if self.is_dupe(call, freq_hz, mode) else ""
 
     def new_mults(
         self, call: str, freq_hz: int, mode: Mode, exchange: dict[str, str]

@@ -66,7 +66,7 @@ async def test_peer_qso_makes_call_a_dupe_for_everyone():
     )
     await _converge(a, b)
     assert b.is_dupe("K1ABC", FREQ_20M, Mode.CW)
-    assert b.dupe_label("K1ABC", FREQ_20M, Mode.CW) == "DUPE — already worked on 20m CW"
+    assert b.dupe_label("K1ABC", FREQ_20M, Mode.CW) == "DUPE"
 
 
 async def test_peer_qso_respects_contest_dupe_rule_band_and_mode():

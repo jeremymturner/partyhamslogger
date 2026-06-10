@@ -77,12 +77,12 @@ async def test_dupe_label_message():
     await s.log_qso(
         call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "2A", "section": "EPA"}
     )
-    assert s.dupe_label("K1ABC", FREQ_20M, Mode.CW) == "DUPE — already worked on 20m CW"
-    # Digital label reflects the mode group, not the concrete mode.
+    assert s.dupe_label("K1ABC", FREQ_20M, Mode.CW) == "DUPE"
+    # Same call works again on a different band / mode group (per the dupe rule).
     await s.log_qso(
         call="K1ABC", freq_hz=FREQ_40M, mode=Mode.FT8, exchange={"class": "2A", "section": "EPA"}
     )
-    assert s.dupe_label("K1ABC", FREQ_40M, Mode.RTTY) == "DUPE — already worked on 40m DIGITAL"
+    assert s.dupe_label("K1ABC", FREQ_40M, Mode.RTTY) == "DUPE"  # 40m DIGITAL slot taken
     # Not a dupe -> empty.
     assert s.dupe_label("K1ABC", FREQ_20M, Mode.USB) == ""
 

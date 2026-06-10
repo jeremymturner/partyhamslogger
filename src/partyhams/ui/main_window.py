@@ -148,6 +148,9 @@ class MainWindow(QMainWindow):
         self._run = True  # Run vs Search & Pounce (picks the macro bank)
         self._esm = False  # ESM: Enter sends the next message
         self._esm_sent = False  # have we sent our exchange/call this QSO?
+        #: When set, the log table is filtered to this callsign (every QSO the
+        #: network has logged with it) — driven by a dupe on the call field.
+        self._call_filter = ""
         self._autocq = False  # Auto-CQ: repeat F1 on a timer while in Run mode
         self._autocq_interval = 10  # seconds; set from app state via set_autocq_interval
         #: Set by the app: on_autocq_interval(secs) persists the chosen interval.
@@ -1436,6 +1439,14 @@ class MainWindow(QMainWindow):
         dupe_msg = self.session.dupe_label(call, freq, mode) if call else ""
         is_dupe = bool(dupe_msg)
 
+        # On a dupe, filter the log to that call so you can see every QSO the whole
+        # network has made with it; clear the filter when the call isn't a dupe
+        # (including when the call field is emptied). Reload only on a change.
+        wanted_filter = call if is_dupe else ""
+        if wanted_filter != self._call_filter:
+            self._call_filter = wanted_filter
+            self._reload_table()
+
         exchange = {name: e.text().strip().upper() for name, e in self._exchange_edits.items()}
         invalid = self._invalid_exchange(exchange)
         new = self.session.new_mults(call, freq, mode, exchange) if call and not is_dupe else set()
@@ -1610,7 +1621,12 @@ class MainWindow(QMainWindow):
         )
 
     def _reload_table(self) -> None:
-        qsos = list(reversed(self.session.recent(200)))  # newest first
+        if self._call_filter:
+            # Every QSO the network has logged with this call (newest first).
+            qsos = [q for q in self.session.qsos() if q.call.upper() == self._call_filter]
+            qsos.reverse()
+        else:
+            qsos = list(reversed(self.session.recent(200)))  # newest first
         self._table.setRowCount(len(qsos))
         local_station = self.session.engine.station_id
         for row, q in enumerate(qsos):
