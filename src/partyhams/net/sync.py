@@ -48,6 +48,10 @@ class LogMerge:
     def get(self, uuid: str) -> QSO | None:
         return self._by_uuid.get(uuid)
 
+    def clear(self) -> None:
+        """Drop all records (a local wipe; does not create tombstones)."""
+        self._by_uuid.clear()
+
     def __len__(self) -> int:
         return sum(1 for q in self._by_uuid.values() if not q.deleted)
 

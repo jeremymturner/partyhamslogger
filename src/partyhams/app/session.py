@@ -329,6 +329,15 @@ class LogSession:
         self._rebuild_indexes()
         self._emit()
 
+    def wipe_log(self) -> None:
+        """Delete every QSO from this log (memory + disk), keeping the contest
+        config. A hard local reset — no tombstones, so it won't propagate as a
+        delete to peers (and peers can re-share what they have)."""
+        self.engine.log.clear()
+        self.store.wipe_qsos()
+        self._rebuild_indexes()
+        self._emit()
+
     def _rebuild_indexes(self) -> None:
         qsos = self.engine.log.qsos()
         self._dupe_keys = {self.contest.dupe_key(q) for q in qsos}

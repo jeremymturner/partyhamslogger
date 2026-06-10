@@ -754,6 +754,56 @@ class MainWindow(QMainWindow):
             edit.clear()
         self._call.setFocus()
 
+    def _open_log_folder(self) -> None:
+        """Reveal the folder holding the current log in the OS file browser."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        from partyhams.app.state import LOGS_DIR
+
+        path = self.session.store.path
+        folder = Path(path).resolve().parent if path and path != ":memory:" else LOGS_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def _wipe_log(self) -> None:
+        """Delete every QSO from the current log (keeps the contest setup)."""
+        from PySide6.QtWidgets import QMessageBox
+
+        count = len(self.session.qsos())
+        confirm = QMessageBox.question(
+            self,
+            "Wipe Current Log",
+            f"Delete all {count} QSO(s) from this log? The contest setup is kept, "
+            "but the contacts can't be recovered.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        self.session.wipe_log()
+        self.statusBar().showMessage("Log wiped", 3000)
+
+    def _delete_app_data(self) -> None:
+        """Delete ~/.partyhams (every log + all settings) and quit the app."""
+        import shutil
+
+        from PySide6.QtWidgets import QMessageBox
+
+        from partyhams.app.state import APP_DIR
+
+        confirm = QMessageBox.warning(
+            self,
+            "Delete All App Data",
+            f"Permanently delete {APP_DIR} — every log and all settings — and quit?\n"
+            "This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        self.session.store.close()  # release the SQLite handle before removing it
+        shutil.rmtree(APP_DIR, ignore_errors=True)
+        self.close()  # triggers the graceful shutdown path -> app quits
+
     def _edit_macros(self) -> None:
         dialog = MacrosDialog(self._macros, self.session.contest, parent=self)
         self._macros_dialog = dialog  # keep alive while open
@@ -785,8 +835,14 @@ class MainWindow(QMainWindow):
         cabrillo = logs_menu.addAction("Export Cabrillo…", self._export_cabrillo)
         cabrillo.setShortcut(QKeySequence(sc.EXPORT_CABRILLO))
         logs_menu.addAction("Auto-export…", self._edit_autoexport)
+        logs_menu.addAction("Open Log Folder", self._open_log_folder)
         logs_menu.addSeparator()
         logs_menu.addAction("QRZ Login…", self._edit_qrz)
+        logs_menu.addSeparator()
+        wipe = logs_menu.addAction("Wipe Current Log…", self._wipe_log)
+        wipe.setStatusTip("Delete every QSO from this log (keeps the contest setup)")
+        nuke = logs_menu.addAction("Delete All App Data && Quit…", self._delete_app_data)
+        nuke.setStatusTip("Remove ~/.partyhams (all logs and settings) and quit")
 
         radio_menu = self.menuBar().addMenu("Radio")
         select_radio = radio_menu.addAction("Select Radio…", self._radio_menu_clicked)

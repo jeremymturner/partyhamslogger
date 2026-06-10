@@ -102,6 +102,38 @@ async def test_delete_qso_tombstones_and_persists():
     assert any(x.deleted for x in s.store.all(include_deleted=True))
 
 
+async def test_wipe_log_clears_qsos_memory_and_disk(tmp_path):
+    from partyhams.app.session import open_session
+
+    db = tmp_path / "log.sqlite"
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W0CPH",
+        sent_exchange={"class": "2A", "section": "OR"},
+        network=None,
+        db_path=db,
+    )
+    await s.log_qso(
+        call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    await s.log_qso(
+        call="W2XYZ", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1D", "section": "NM"}
+    )
+    assert len(s.qsos()) == 2 and s.is_dupe("K1ABC", FREQ_20M, Mode.CW)
+
+    s.wipe_log()
+    assert s.qsos() == []  # gone from memory
+    assert not s.is_dupe("K1ABC", FREQ_20M, Mode.CW)  # and the dupe index
+    # No tombstones left behind (a hard wipe, not a CRDT delete).
+    assert s.store.all(include_deleted=True) == []
+    # Contest setup is preserved.
+    assert s.config.my_call == "W0CPH"
+
+    # Persisted: a reopen shows an empty log.
+    s.store.close()
+    assert open_session(db).qsos() == []
+
+
 async def test_set_operator_stamps_new_qsos_and_persists(tmp_path):
     db = tmp_path / "log.sqlite"
     from partyhams.app.session import build_session, open_session

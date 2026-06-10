@@ -157,6 +157,12 @@ class SqliteLog:
         sql += " ORDER BY timestamp, uuid"
         return [self._from_row(r) for r in self._conn.execute(sql)]
 
+    def wipe_qsos(self) -> None:
+        """Delete every QSO (no tombstones) — a hard local reset of the log. The
+        contest config in ``meta`` and chat history are kept."""
+        self._conn.execute("DELETE FROM qso")
+        self._conn.commit()
+
     # --- mapping ---
     @staticmethod
     def _to_row(q: QSO) -> dict:
