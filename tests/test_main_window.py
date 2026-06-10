@@ -105,6 +105,37 @@ async def test_edit_qso_dialog_prefills_and_preserves_freq():
     assert [x.call for x in s.qsos()] == ["K1XYZ"]
 
 
+async def test_edit_dialog_validates_exchange_on_save():
+    from PySide6.QtWidgets import QDialog
+
+    from partyhams.ui.qso_dialog import QsoEditDialog
+
+    w = _window()
+    s = w.session
+    q = await s.log_qso(
+        call="K1ABC", freq_hz=14_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    dialog = QsoEditDialog(s, q)
+
+    # An invalid section blocks Save and offers a suggestion.
+    dialog._exchange_edits["section"].setText("ORE")
+    dialog.accept()
+    assert dialog.result() != QDialog.DialogCode.Accepted
+    assert not dialog._error.isHidden()
+    assert "try OR?" in dialog._error.text()
+
+    # An empty callsign is also rejected.
+    dialog._exchange_edits["section"].setText("OR")
+    dialog._call.setText("")
+    assert "Callsign is required" in dialog._errors()
+
+    # A valid edit goes through.
+    dialog._call.setText("K1ABC")
+    assert dialog._errors() == []
+    dialog.accept()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+
+
 async def test_delete_qso_via_row():
     w = _window()
     s = w.session

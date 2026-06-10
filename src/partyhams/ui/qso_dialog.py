@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QLabel,
     QLineEdit,
     QVBoxLayout,
     QWidget,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from partyhams.app.session import LogSession
 from partyhams.core.models import QSO, Mode
+from partyhams.ui import style
 from partyhams.ui.widgets import make_upper
 
 # Modes offered when editing — a superset covering anything we might have logged.
@@ -97,14 +99,48 @@ class QsoEditDialog(QDialog):
 
         form.addRow("Time (UTC)", self._time)
 
+        # Validation problems (invalid section/class, missing call) shown on Save.
+        self._error = QLabel()
+        self._error.setStyleSheet(f"color: {style.DUPE}; font-weight: bold;")
+        self._error.setWordWrap(True)
+        self._error.hide()
+
         outer = QVBoxLayout(self)
         outer.addLayout(form)
+        outer.addWidget(self._error)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         outer.addWidget(buttons)
+
+    def _errors(self) -> list[str]:
+        """Validation problems with the current fields ([] when valid). Mirrors
+        the live entry row: required + per-field validators, with a suggestion for
+        a near-miss (e.g. an invalid section)."""
+        problems: list[str] = []
+        if not self._call.text().strip():
+            problems.append("Callsign is required")
+        for field in self._session.contest.exchange_fields():
+            value = self._exchange_edits[field.name].text().strip().upper()
+            if field.required and not value:
+                problems.append(f"{field.label} is required")
+            elif value and field.validator and not field.validator(value):
+                msg = f"{field.label} '{value}' is invalid"
+                if field.suggest and (suggestion := field.suggest(value)):
+                    msg += f" — try {suggestion}?"
+                problems.append(msg)
+        return problems
+
+    def accept(self) -> None:
+        """Validate before closing; on failure show the problems and stay open."""
+        problems = self._errors()
+        if problems:
+            self._error.setText("  •  ".join(problems))
+            self._error.show()
+            return
+        super().accept()
 
     def _freq_hz(self) -> int:
         """Keep the QSO's exact frequency unless the band changed; then use the
