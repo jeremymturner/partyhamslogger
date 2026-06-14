@@ -494,6 +494,30 @@ class LogSession:
         calls = sorted({q.call for q in self.engine.log.qsos() if q.call.startswith(frag)})
         return calls[:limit]
 
+    def worked_near(self, freq_hz: int, mode: Mode, *, tolerance_hz: int = 200) -> list[QSO]:
+        """QSOs already worked at ~``freq_hz`` (within ``tolerance_hz``) on the same
+        mode group, most-recent first.
+
+        Drives the Search & Pounce dupe hint: when the operator tunes to a
+        frequency, this surfaces a station already in the (network-wide) log on
+        that frequency+mode, which is likely the same station still calling CQ —
+        so the op can move on instead of working a dupe. Mode is matched by group
+        (CW / Phone / Digital) to mirror the dupe rule. Returns ``[]`` for an
+        out-of-band / unknown frequency.
+        """
+        if freq_hz <= 0:
+            return []
+        group = mode_group_for(mode)
+        matches = [
+            q
+            for q in self.engine.log.qsos()  # already excludes tombstoned QSOs
+            if q.call
+            and abs(q.freq_hz - freq_hz) <= tolerance_hz
+            and q.mode_group == group
+        ]
+        matches.sort(key=lambda q: q.timestamp, reverse=True)
+        return matches
+
     # ------------------------------------------------------------------ #
     # views
     # ------------------------------------------------------------------ #

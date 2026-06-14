@@ -260,6 +260,66 @@ async def test_partial_matches():
     assert s.partial_matches("") == []
 
 
+async def test_worked_near_finds_station_on_same_freq_and_mode():
+    s = make_session()
+    await s.log_qso(
+        call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "2A", "section": "EPA"}
+    )
+    # Exact frequency, same mode group -> found.
+    near = s.worked_near(FREQ_20M, Mode.CW)
+    assert [q.call for q in near] == ["K1ABC"]
+    # Within the default tolerance (±200 Hz) -> still found.
+    assert [q.call for q in s.worked_near(FREQ_20M + 150, Mode.CW)] == ["K1ABC"]
+    # Beyond tolerance -> nothing.
+    assert s.worked_near(FREQ_20M + 5_000, Mode.CW) == []
+    # Different mode group (Phone vs CW) -> nothing, even on the same freq.
+    assert s.worked_near(FREQ_20M, Mode.USB) == []
+    # An out-of-band / zero frequency is never a match.
+    assert s.worked_near(0, Mode.CW) == []
+
+
+async def test_worked_near_groups_modes_and_honors_tolerance_arg():
+    s = make_session()
+    await s.log_qso(
+        call="W1AW", freq_hz=FREQ_20M, mode=Mode.LSB, exchange={"class": "2A", "section": "EPA"}
+    )
+    # Phone modes share a group: a station worked on LSB matches a USB tune-in.
+    assert [q.call for q in s.worked_near(FREQ_20M, Mode.USB)] == ["W1AW"]
+    # The tolerance is configurable.
+    assert s.worked_near(FREQ_20M + 800, Mode.USB) == []
+    assert [q.call for q in s.worked_near(FREQ_20M + 800, Mode.USB, tolerance_hz=1000)] == ["W1AW"]
+
+
+async def test_worked_near_excludes_deleted_and_orders_recent_first():
+    from datetime import UTC, datetime
+
+    s = make_session()
+    old = datetime(2026, 6, 14, 18, 0, tzinfo=UTC)
+    new = datetime(2026, 6, 14, 18, 30, tzinfo=UTC)
+    await s.log_qso(
+        call="K1OLD",
+        freq_hz=FREQ_20M,
+        mode=Mode.CW,
+        exchange={"class": "1A", "section": "OR"},
+        timestamp=old,
+    )
+    await s.log_qso(
+        call="K1NEW",
+        freq_hz=FREQ_20M + 50,
+        mode=Mode.CW,
+        exchange={"class": "1A", "section": "OR"},
+        timestamp=new,
+    )
+    # Both within tolerance; most-recent first.
+    assert [q.call for q in s.worked_near(FREQ_20M, Mode.CW)] == ["K1NEW", "K1OLD"]
+    # A tombstoned QSO drops out of the results.
+    gone = await s.log_qso(
+        call="K1GONE", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1A", "section": "OR"}
+    )
+    s.delete_qso(gone)
+    assert "K1GONE" not in {q.call for q in s.worked_near(FREQ_20M, Mode.CW)}
+
+
 async def test_listener_fires_on_log():
     s = make_session()
     hits = []
