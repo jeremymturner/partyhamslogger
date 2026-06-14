@@ -1,0 +1,113 @@
+name: Build & Release
+
+# Build the standalone PyInstaller bundle on every target OS/arch and attach the
+# artifacts to a GitHub release. PyInstaller can't cross-compile, so each artifact
+# is built on a matching runner (see docs/PACKAGING.md).
+#
+#   - Push a tag like v0.1.0  -> builds all platforms AND publishes a release.
+#   - Run manually (workflow_dispatch) -> builds all platforms, uploads the
+#     bundles as workflow artifacts only (no release is created).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+          - os: macos-13          # Intel
+            label: macos-x64
+          - os: macos-14          # Apple Silicon
+            label: macos-arm64
+          - os: ubuntu-latest
+            label: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # PySide6's PyInstaller hook imports Qt at build time; headless Linux
+      # runners need these shared libs present for that import to succeed.
+      - name: Install Qt runtime libs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[packaging]"
+
+      - name: Build standalone bundle
+        run: pyinstaller --noconfirm --clean packaging/partyhams.spec
+
+      - name: Package bundle (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p out
+          tar czf "out/PartyHamsLogger-${{ github.ref_name }}-${{ matrix.label }}.tar.gz" \
+            -C dist PartyHamsLogger
+
+      - name: Package bundle (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p out
+          # ditto preserves the .app bundle's symlinks and metadata (zip mangles them).
+          ditto -c -k --keepParent dist/PartyHamsLogger.app \
+            "out/PartyHamsLogger-${{ github.ref_name }}-${{ matrix.label }}.zip"
+
+      - name: Package bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Compress-Archive -Path dist/PartyHamsLogger `
+            -DestinationPath "out/PartyHamsLogger-${{ github.ref_name }}-${{ matrix.label }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PartyHamsLogger-${{ matrix.label }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Compute checksums
+        working-directory: artifacts
+        run: |
+          shopt -s nullglob
+          sha256sum *.zip *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create / update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
