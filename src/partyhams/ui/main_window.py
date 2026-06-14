@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer
@@ -107,6 +108,20 @@ def should_autocq(run: bool, enabled: bool, call_text: str) -> bool:
     started entering a callsign (we don't keep CQ-ing while working someone).
     """
     return bool(run and enabled and not call_text.strip())
+
+
+def _humanize_ago(delta: timedelta) -> str:
+    """A compact "time since" label for the S&P dupe hint (e.g. ``"8 min ago"``)."""
+    secs = max(0, int(delta.total_seconds()))
+    if secs < 60:
+        return "just now"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins} min ago"
+    hours = mins // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    return f"{hours // 24}d ago"
 
 
 #: Allowed periodic ADIF auto-export interval bounds (minutes).
@@ -221,6 +236,9 @@ class MainWindow(QMainWindow):
         self._radio_freq: int | None = None
         self._radio_mode: Mode | None = None
         self._radio_connected = False
+        # Search & Pounce dupe hint: the last frequency we offered a "worked here"
+        # suggestion for, so we prompt once per QSY rather than on every poll.
+        self._sp_probe_freq: int | None = None
 
         self.setWindowTitle(f"PartyHams Logger — {session.config.my_call} — {session.contest.name}")
         self.resize(1060, 580)
@@ -1320,6 +1338,7 @@ class MainWindow(QMainWindow):
         self._cat = poller is not None
         self._radio_freq = None
         self._radio_mode = None
+        self._sp_probe_freq = None
         self._radio_connected = poller.connected if poller is not None else False
         self._update_band_mode_boxes()
         if poller is not None:
@@ -1513,8 +1532,42 @@ class MainWindow(QMainWindow):
         mode_idx = self._mode.findData(state.mode)
         if mode_idx >= 0:
             self._mode.setCurrentIndex(mode_idx)
+        self._maybe_warn_worked_here(state)
         self._refresh_indicators()  # updates dupe/mult badges + the freq readout
         self._update_radio_label()  # model/nickname may have just arrived
+
+    def _maybe_warn_worked_here(self, state: RadioState) -> None:
+        """Search & Pounce convenience (issue #1): on a QSY to a new frequency with
+        no call entered yet, pre-fill the call of a station already worked here and
+        flag it as a likely dupe in the status bar — so the op can move on instead
+        of working it again. Opt-outs: Run mode, or a call already being entered.
+
+        We act only on a real QSY (frequency moved beyond the match tolerance from
+        the last suggestion), not on every poll while parked on one frequency, so a
+        call the op cleared isn't immediately re-filled.
+        """
+        if self._run:  # Run mode = calling CQ, not tuning around
+            return
+        if self._call.text().strip():  # don't clobber a call in progress
+            return
+        freq = state.freq_hz
+        tol = 200
+        if freq <= 0:
+            return
+        if self._sp_probe_freq is not None and abs(freq - self._sp_probe_freq) <= tol:
+            return  # still on (essentially) the same spot we already checked
+        self._sp_probe_freq = freq
+        matches = self.session.worked_near(freq, state.mode, tolerance_hz=tol)
+        if not matches:
+            return
+        worked = matches[0]
+        self._call.setText(worked.call)  # reddens the field as a dupe via _refresh_indicators
+        ago = _humanize_ago(utcnow() - worked.timestamp)
+        self.statusBar().showMessage(
+            f"Possible dupe: {worked.call} worked here {ago} "
+            f"({worked.band_label} {worked.mode_group.value})",
+            8000,
+        )
 
     def _update_freq_readout(self) -> None:
         freq = self._current_freq()

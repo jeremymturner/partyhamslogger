@@ -515,3 +515,57 @@ def test_wsjtx_submode_overrides_rig_data_mode():
     w._on_wsjtx_status(Status(id="WSJT", mode="USB", dial_freq=14_200_000))
     assert w._wsjtx_mode is None
     assert w._current_mode() == Mode.FT8  # back to the rig's data mode
+
+
+async def test_humanize_ago_labels():
+    from datetime import timedelta
+
+    from partyhams.ui.main_window import _humanize_ago
+
+    assert _humanize_ago(timedelta(seconds=5)) == "just now"
+    assert _humanize_ago(timedelta(minutes=8)) == "8 min ago"
+    assert _humanize_ago(timedelta(hours=3)) == "3h ago"
+    assert _humanize_ago(timedelta(days=2)) == "2d ago"
+    assert _humanize_ago(timedelta(seconds=-10)) == "just now"  # clamps negatives
+
+
+async def test_sp_dupe_warn_prefills_call_on_qsy():
+    """Issue #1: tuning to a worked frequency in S&P pre-fills the call as a dupe."""
+    from partyhams.ui import style
+
+    w = _window()
+    s = w.session
+    await s.log_qso(
+        call="K1ABC", freq_hz=14_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    w._set_run(False)  # Search & Pounce
+
+    # QSY onto the worked frequency (within tolerance) -> call pre-filled + reddened.
+    w._apply_radio_state(RadioState(freq_hz=14_040_100, mode=Mode.CW))
+    assert w._call.text() == "K1ABC"
+    assert style.DUPE in w._call.styleSheet()
+
+    # If the op clears it, a poll on essentially the same spot won't re-fill it.
+    w._call.setText("")
+    w._apply_radio_state(RadioState(freq_hz=14_040_120, mode=Mode.CW))
+    assert w._call.text() == ""
+
+
+async def test_sp_dupe_warn_silent_in_run_mode_and_off_frequency():
+    w = _window()
+    s = w.session
+    await s.log_qso(
+        call="K1ABC", freq_hz=14_040_000, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+
+    # Run mode never auto-fills (you're calling CQ, not tuning around).
+    assert w._run is True
+    w._apply_radio_state(RadioState(freq_hz=14_040_000, mode=Mode.CW))
+    assert w._call.text() == ""
+
+    # S&P, but off-frequency or wrong mode group -> no suggestion.
+    w._set_run(False)
+    w._apply_radio_state(RadioState(freq_hz=14_100_000, mode=Mode.CW))  # far away
+    assert w._call.text() == ""
+    w._apply_radio_state(RadioState(freq_hz=14_040_000, mode=Mode.USB))  # CW logged, not Phone
+    assert w._call.text() == ""

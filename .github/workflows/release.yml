@@ -26,8 +26,6 @@ jobs:
         include:
           - os: windows-latest
             label: windows-x64
-          - os: macos-13          # Intel
-            label: macos-x64
           - os: macos-14          # Apple Silicon
             label: macos-arm64
           - os: ubuntu-latest
