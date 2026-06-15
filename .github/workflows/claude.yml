@@ -5,12 +5,12 @@ name: Claude
 #     small, clear fixes);
 #   * any "@claude …" comment on an issue or PR (or in a PR review) is answered.
 #
-# Prerequisites (one-time, done by a repo admin — see README/PR notes):
-#   1. Install the Claude GitHub App:  claude /install-github-app
-#      (or manually from https://github.com/apps/claude)
-#   2. Add the repo secret ANTHROPIC_API_KEY  (or CLAUDE_CODE_OAUTH_TOKEN to bill
-#      a Claude subscription — swap it in below). Until the secret exists, runs
-#      will fail, so configure it before merging this workflow.
+# Prerequisites (one-time, done by a repo admin via `claude /install-github-app`):
+#   1. The Claude GitHub App installed on this repo (https://github.com/apps/claude).
+#   2. Auth secret. This repo uses CLAUDE_CODE_OAUTH_TOKEN (a Claude subscription
+#      token, set up by the install flow). To use a pay-as-you-go API key instead,
+#      set ANTHROPIC_API_KEY and replace the `claude_code_oauth_token:` lines with
+#      `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}`.
 
 on:
   issues:
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             Investigate this newly filed GitHub issue. Read the description,
             search the codebase for the relevant code, and identify the likely
@@ -65,5 +65,5 @@ jobs:
       - uses: actions/checkout@v4
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: --max-turns 12 --model claude-opus-4-8
