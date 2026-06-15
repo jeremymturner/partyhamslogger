@@ -112,6 +112,38 @@ shasum -a 256 -c SHA256SUMS  # macOS
 md5sum -c MD5SUMS            # Linux  (macOS: md5 -r)
 ```
 
+## Discord announcements
+
+When a release is published, the workflow can post an announcement to a Discord
+channel so users hear about new versions. It's **opt-in** — with nothing
+configured, the step is skipped and releases work exactly as before.
+
+To enable it:
+
+1. In your Discord server: **Channel → Edit → Integrations → Webhooks → New
+   Webhook**, then **Copy Webhook URL**.
+2. In the GitHub repo: **Settings → Secrets and variables → Actions → New
+   repository secret** named `DISCORD_WEBHOOK_URL`, pasting that URL.
+3. *(Optional)* add a repository **variable** `DISCORD_MENTION` (e.g. `@everyone`
+   or `<@&ROLE_ID>`) to ping the channel/role above the announcement.
+
+On the next tag, the release job runs
+[`scripts/notify_discord.py`](../scripts/notify_discord.py), which reads the
+freshly-published release via the GitHub API and posts an embed (title, notes,
+and download links) to the webhook. The logic lives in
+`partyhams.notify.discord` (pure payload builder + injectable transport, so it's
+unit-tested offline); preview it without posting:
+
+```bash
+python3 scripts/notify_discord.py --repo OWNER/NAME --tag vX.Y.Z --dry-run
+```
+
+A notification failure never fails the release (the version is already out) — the
+step just logs a warning. Note that a release created by the workflow's
+`GITHUB_TOKEN` does **not** trigger a separate `on: release` workflow, which is
+why the announcement runs as a step inside the build/release job rather than as
+its own workflow.
+
 ## CI matrix note
 
 Because there's no cross-compilation, the natural automation is a GitHub Actions
