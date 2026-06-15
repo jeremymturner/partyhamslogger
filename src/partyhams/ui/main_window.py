@@ -995,6 +995,7 @@ class MainWindow(QMainWindow):
         ref_menu = tools_menu.addMenu("Reference Data")
         ref_menu.addAction("Import Super Check Partial…", self._import_scp)
         ref_menu.addAction("Import city.dat…", self._import_city)
+        ref_menu.addAction("Import Call History…", self._import_call_history)
         ref_menu.addSeparator()
         ref_menu.addAction("Import LoTW users…", self._import_lotw)
         ref_menu.addAction("Import eQSL users…", self._import_eqsl)
@@ -1413,6 +1414,14 @@ class MainWindow(QMainWindow):
             count = self._refdata.import_city_dat(text)
             self.statusBar().showMessage(f"Loaded {count} city.dat records", 4000)
 
+    def _import_call_history(self) -> None:
+        text = self._pick_refdata_file("Import Call History")
+        if text is not None:
+            fields = [f.name for f in self.session.contest.exchange_fields()]
+            count = self._refdata.import_call_history(text, fields)
+            self.statusBar().showMessage(f"Loaded {count} call-history entries", 4000)
+            self._autofill_from_history()  # apply to the call already in the box
+
     def _import_lotw(self) -> None:
         text = self._pick_refdata_file("Import LoTW users")
         if text is not None:
@@ -1500,6 +1509,7 @@ class MainWindow(QMainWindow):
         self._call.setMinimumWidth(110)
         self._call.setMaximumWidth(160)
         make_upper(self._call)
+        self._call.textChanged.connect(lambda *_: self._autofill_from_history())
         self._call.textChanged.connect(lambda *_: self._refresh_indicators())
         self._call.textChanged.connect(self._on_call_typed)
         self._call.textChanged.connect(lambda *_: self._on_call_qrz())
@@ -1768,6 +1778,24 @@ class MainWindow(QMainWindow):
             if label:
                 lines.append("QTH: " + label)
         self._call.setToolTip("\n".join(lines))
+
+    def _autofill_from_history(self) -> None:
+        """Pre-fill exchange fields from the imported call-history file (issue #3).
+
+        Non-destructive: only fills fields the operator has left blank, so anything
+        typed (or a correction) always wins. Runs on call changes, so clearing a
+        field by hand won't be re-stomped until the callsign changes."""
+        call = self._call.text().strip().upper()
+        if not call:
+            return
+        known = self._refdata.history_lookup(call)
+        if not known:
+            return
+        for field in self.session.contest.exchange_fields():
+            edit = self._exchange_edits[field.name]
+            value = known.get(field.name)
+            if value and not edit.text().strip():
+                edit.setText(value)
 
     def _advance_or_log(self) -> None:
         if not self._call.text().strip():

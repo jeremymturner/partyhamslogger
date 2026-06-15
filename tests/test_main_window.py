@@ -592,6 +592,7 @@ def test_set_wpm_updates_label_persists_and_highlights(monkeypatch):
     from partyhams.ui import style
 
     w = _window()
+    w._macros.cw_wpm = 18  # known starting point (independent of any saved macros)
     w._set_wpm(24)
     assert w._macros.cw_wpm == 24
     assert saved == [24]  # persisted with the event's macros
@@ -655,3 +656,48 @@ def test_cw_keyboard_streams_appended_chars_and_enter_clears():
     assert w._cw_keyboard.text() == "" and w._cw_kbd_sent == ""
     w._on_cw_keyboard_edited("k")
     assert sent == ["C", "Q", " ", "K"]
+
+
+# --- call-history exchange auto-fill (issue #3) -------------------------------
+
+
+def test_call_history_autofills_empty_exchange_only(tmp_path):
+    w = _window()
+    w._refdata.dir = tmp_path
+    # Import a tiny call-history map for this Field Day session.
+    n = w._refdata.import_call_history(
+        "Call,Class,Section\nK1ABC,2A,EMA\n",
+        [f.name for f in w.session.contest.exchange_fields()],
+    )
+    assert n == 1
+
+    # Typing a known call fills the blank exchange fields.
+    w._call.setText("K1ABC")
+    assert w._exchange_edits["class"].text() == "2A"
+    assert w._exchange_edits["section"].text() == "EMA"
+
+
+def test_call_history_does_not_overwrite_typed_values(tmp_path):
+    w = _window()
+    w._refdata.dir = tmp_path
+    w._refdata.import_call_history(
+        "Call,Class,Section\nK1ABC,2A,EMA\n",
+        [f.name for f in w.session.contest.exchange_fields()],
+    )
+    # Operator already typed a class -> history must not clobber it.
+    w._exchange_edits["class"].setText("3A")
+    w._call.setText("K1ABC")
+    assert w._exchange_edits["class"].text() == "3A"  # kept
+    assert w._exchange_edits["section"].text() == "EMA"  # blank one still filled
+
+
+def test_call_history_unknown_call_leaves_exchange_alone(tmp_path):
+    w = _window()
+    w._refdata.dir = tmp_path
+    w._refdata.import_call_history(
+        "Call,Class,Section\nK1ABC,2A,EMA\n",
+        [f.name for f in w.session.contest.exchange_fields()],
+    )
+    w._call.setText("W9NONE")
+    assert w._exchange_edits["class"].text() == ""
+    assert w._exchange_edits["section"].text() == ""
