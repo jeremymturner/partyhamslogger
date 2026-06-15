@@ -8,11 +8,15 @@ sources and versions, so we parse what's reasonable and silently skip junk.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 #: A callsign is alphanumeric with optional ``/`` portable/secondary markers,
 #: and always contains at least one digit — which conveniently rejects CSV
 #: headers ("Call", "Date") and prose tokens that aren't real callsigns.
 _CALL_RE = re.compile(r"^(?=[A-Z0-9/]*[0-9])[A-Z0-9]+(?:/[A-Z0-9]+)*$")
+
+#: Common N1MM call-history column names mapped to our exchange field keys.
+_HISTORY_ALIASES = {"sect": "section"}
 
 
 def _clean_lines(text: str) -> list[str]:
@@ -84,3 +88,65 @@ def parse_city_dat(text: str) -> dict[str, dict[str, str]]:
                 record[key] = parts[idx]
         table[prefix] = record
     return table
+
+
+def parse_call_history(
+    text: str,
+    fields: Iterable[str],
+    aliases: dict[str, str] | None = None,
+) -> dict[str, dict[str, str]]:
+    """Parse a call-history file into a ``{CALL: {exchange_field: value}}`` map.
+
+    Two layouts are auto-detected:
+
+    * **N1MM Call History** — a header line ``!!Order!!,Call,Sect,…`` declares the
+      column order; ``#`` comments and blank lines are ignored; data rows follow.
+    * **Simple CSV** — the first non-comment line is a header naming the columns,
+      the first of which must be ``Call``.
+
+    Column names are matched case-insensitively against ``fields`` (the active
+    contest's exchange field names, e.g. ``{"class", "section"}``), with
+    ``aliases`` (default ``sect→section``) bridging common N1MM names. Columns
+    that don't map to an exchange field are ignored. Calls are uppercased and
+    entries carrying no recognized exchange values are dropped — so importing a
+    file for the wrong contest simply yields nothing rather than bad data.
+    """
+    canon = {f.lower(): f for f in fields}  # lowercased column name -> our key
+    alias_map = {**_HISTORY_ALIASES, **(aliases or {})}
+    lines = _clean_lines(text)
+    if not lines:
+        return {}
+
+    # Header: an explicit N1MM !!Order!! line wins; otherwise the first line.
+    header, body = lines[0], lines[1:]
+    for i, line in enumerate(lines):
+        if line.lower().startswith("!!order!!"):
+            header = line.split(",", 1)[1] if "," in line else ""
+            body = lines[i + 1 :]
+            break
+
+    cols = [c.strip() for c in header.split(",")]
+    call_idx = next((i for i, c in enumerate(cols) if c.lower() == "call"), None)
+    if call_idx is None:
+        return {}
+    # Resolve each column to a canonical exchange-field key (None => ignore it).
+    resolved = [canon.get(alias_map.get(c.lower(), c.lower())) for c in cols]
+
+    out: dict[str, dict[str, str]] = {}
+    for line in body:
+        if line.lower().startswith("!!order!!"):
+            continue  # stray repeated header
+        parts = [p.strip() for p in line.split(",")]
+        if call_idx >= len(parts) or not parts[call_idx]:
+            continue
+        call = parts[call_idx].split()[0].upper()
+        if not _CALL_RE.match(call):
+            continue
+        record = {
+            key: parts[i]
+            for i, key in enumerate(resolved)
+            if key and i != call_idx and i < len(parts) and parts[i]
+        }
+        if record:
+            out[call] = record
+    return out

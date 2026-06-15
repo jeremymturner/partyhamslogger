@@ -9,10 +9,16 @@ for "known user" indicators, and a longest-prefix city.dat lookup.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 from partyhams.app.state import APP_DIR
-from partyhams.refdata.parsers import parse_city_dat, parse_scp, parse_user_list
+from partyhams.refdata.parsers import (
+    parse_call_history,
+    parse_city_dat,
+    parse_scp,
+    parse_user_list,
+)
 
 REFDATA_DIR = APP_DIR / "refdata"
 
@@ -21,6 +27,7 @@ _CITY_FILE = "city.json"
 _LOTW_FILE = "lotw.json"
 _EQSL_FILE = "eqsl.json"
 _QRZ_FILE = "qrz.json"
+_HISTORY_FILE = "history.json"
 
 
 class RefData:
@@ -33,6 +40,8 @@ class RefData:
         self.lotw: set[str] = set()
         self.eqsl: set[str] = set()
         self.qrz: set[str] = set()
+        #: call -> known exchange fields (from an imported call-history file).
+        self.history: dict[str, dict[str, str]] = {}
 
     # --- persistence -------------------------------------------------- #
     def _path(self, name: str) -> Path:
@@ -60,6 +69,11 @@ class RefData:
         except (OSError, ValueError):
             city = {}
         self.city = city if isinstance(city, dict) else {}
+        try:
+            history = json.loads(self._path(_HISTORY_FILE).read_text())
+        except (OSError, ValueError):
+            history = {}
+        self.history = history if isinstance(history, dict) else {}
 
     # --- imports (parse + store + persist) ---------------------------- #
     def import_scp(self, text: str) -> int:
@@ -88,6 +102,16 @@ class RefData:
         self._write_set(_QRZ_FILE, self.qrz)
         return len(self.qrz)
 
+    def import_call_history(
+        self, text: str, fields: Iterable[str], aliases: dict[str, str] | None = None
+    ) -> int:
+        """Import a call-history file, resolving columns against ``fields`` (the
+        active contest's exchange field names). Persists the normalized map."""
+        self.history = parse_call_history(text, fields, aliases)
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self._path(_HISTORY_FILE).write_text(json.dumps(self.history))
+        return len(self.history)
+
     # --- lookups ------------------------------------------------------ #
     def is_scp_match(self, fragment: str, limit: int = 20) -> list[str]:
         """SCP calls starting with ``fragment`` (or containing it as a fallback).
@@ -112,6 +136,10 @@ class RefData:
 
     def qrz_known(self, call: str) -> bool:
         return call.strip().upper() in self.qrz
+
+    def history_lookup(self, call: str) -> dict[str, str] | None:
+        """Known exchange fields for ``call`` from the call-history file, if any."""
+        return self.history.get(call.strip().upper()) or None
 
     def city_lookup(self, call: str) -> dict[str, str] | None:
         """Longest-prefix match of ``call`` against the city.dat table."""
