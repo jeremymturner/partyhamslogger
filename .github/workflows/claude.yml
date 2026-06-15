@@ -1,8 +1,8 @@
 name: Claude
 
-# Lets Claude work the issue tracker automatically:
-#   * every newly-filed issue is investigated (analysis comment, + a draft PR for
-#     small, clear fixes);
+# Lets Claude work the issue tracker:
+#   * label an issue 'claude' (at creation or later) and it's investigated
+#     (analysis comment, + a draft PR for small, clear fixes);
 #   * any "@claude …" comment on an issue or PR (or in a PR review) is answered.
 #
 # Prerequisites (one-time, done by a repo admin via `claude /install-github-app`):
@@ -14,7 +14,7 @@ name: Claude
 
 on:
   issues:
-    types: [opened]
+    types: [opened, labeled]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -29,9 +29,12 @@ permissions:
   id-token: write  # the action exchanges a GitHub OIDC token for a Claude-App token
 
 jobs:
-  # Auto-investigate every newly filed issue.
+  # Investigate an issue once it carries the 'claude' label — either applied at
+  # creation, or added later (which is the usual "hand this to Claude" trigger).
   investigate:
-    if: github.event_name == 'issues'
+    if: |
+      (github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'claude')) ||
+      (github.event.action == 'labeled' && github.event.label.name == 'claude')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -43,7 +46,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            Investigate this newly filed GitHub issue. Read the description,
+            Investigate this GitHub issue (it was labeled for you). Read the description,
             search the codebase for the relevant code, and identify the likely
             root cause. Post a clear analysis comment on the issue with your
             findings and a proposed approach. If the fix is small and
