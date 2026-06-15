@@ -22,6 +22,16 @@ from partyhams.contest.base import ContestDefinition, Macro
 MACROS_DIR = APP_DIR / "macros"
 DEFAULT_WPM = 28
 
+# CW keyer speed bounds + the quick-set presets shown on the CW speed bar.
+WPM_MIN = 5
+WPM_MAX = 60
+CW_WPM_PRESETS: tuple[int, ...] = (18, 20, 24, 28, 30)
+
+
+def clamp_wpm(wpm: int) -> int:
+    """Clamp a CW keyer speed into the supported WPM range."""
+    return max(WPM_MIN, min(WPM_MAX, int(wpm)))
+
 # Inline markers that trigger an action instead of being sent as text.
 _ACTIONS = {"LOG", "WIPE"}
 _TOKEN_RE = re.compile(r"\{([A-Za-z0-9_&?]+)\}")

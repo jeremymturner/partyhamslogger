@@ -569,3 +569,89 @@ async def test_sp_dupe_warn_silent_in_run_mode_and_off_frequency():
     assert w._call.text() == ""
     w._apply_radio_state(RadioState(freq_hz=14_040_000, mode=Mode.USB))  # CW logged, not Phone
     assert w._call.text() == ""
+
+
+# --- CW speed bar + live keyboard sender (issue #4) ---------------------------
+
+
+def test_cw_bar_visible_only_in_cw_mode():
+    w = _window()
+    _set_mode(w, Mode.CW)
+    w._update_bottom_bars()
+    assert not w._cw_bar.isHidden()  # CW -> speed bar shows
+    _set_mode(w, Mode.USB)
+    w._update_bottom_bars()
+    assert w._cw_bar.isHidden()  # phone -> hidden (no CW speed there)
+
+
+def test_set_wpm_updates_label_persists_and_highlights(monkeypatch):
+    saved = []
+    monkeypatch.setattr(
+        "partyhams.ui.main_window.save_macros", lambda cid, ms, *a, **k: saved.append(ms.cw_wpm)
+    )
+    from partyhams.ui import style
+
+    w = _window()
+    w._set_wpm(24)
+    assert w._macros.cw_wpm == 24
+    assert saved == [24]  # persisted with the event's macros
+    assert w._wpm_label.text() == "24 WPM"
+    # The matching preset is outlined; others are not.
+    assert style.MULT in w._wpm_buttons[24].styleSheet()
+    assert w._wpm_buttons[28].styleSheet() == ""
+
+
+def test_set_wpm_clamps_to_range(monkeypatch):
+    monkeypatch.setattr("partyhams.ui.main_window.save_macros", lambda *a, **k: None)
+    from partyhams.app.macros import WPM_MAX, WPM_MIN
+
+    w = _window()
+    w._set_wpm(WPM_MAX + 50)
+    assert w._macros.cw_wpm == WPM_MAX
+    w._bump_wpm(+5)
+    assert w._macros.cw_wpm == WPM_MAX  # can't exceed the ceiling
+    w._set_wpm(WPM_MIN - 50)
+    assert w._macros.cw_wpm == WPM_MIN
+
+
+def test_up_down_arrows_change_wpm_from_entry_and_keyboard(monkeypatch):
+    monkeypatch.setattr("partyhams.ui.main_window.save_macros", lambda *a, **k: None)
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    w = _window()
+    w._macros.cw_wpm = 20
+
+    def press(widget, key):
+        ev = QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
+        return w.eventFilter(widget, ev)
+
+    # Up from the call field bumps +1 and consumes the key.
+    assert press(w._call, Qt.Key.Key_Up) is True
+    assert w._macros.cw_wpm == 21
+    # Down from the live CW keyboard nudges -1.
+    assert press(w._cw_keyboard, Qt.Key.Key_Down) is True
+    assert w._macros.cw_wpm == 20
+
+
+def test_cw_keyboard_streams_appended_chars_and_enter_clears():
+    w = _window()
+    sent = []
+    w._send_cw = lambda text, *a, **k: sent.append(text)  # capture, no radio needed
+
+    # Typing streams only the newly-appended characters, upper-cased.
+    w._on_cw_keyboard_edited("c")
+    w._on_cw_keyboard_edited("cq")
+    w._on_cw_keyboard_edited("cq ")
+    assert sent == ["C", "Q", " "]
+
+    # A deletion can't be un-sent and emits nothing.
+    w._on_cw_keyboard_edited("cq")
+    assert sent == ["C", "Q", " "]
+
+    # Enter clears the field and resets the tracker; the next char sends fresh.
+    w._cw_keyboard.setText("cq")
+    w._clear_cw_keyboard()
+    assert w._cw_keyboard.text() == "" and w._cw_kbd_sent == ""
+    w._on_cw_keyboard_edited("k")
+    assert sent == ["C", "Q", " ", "K"]
