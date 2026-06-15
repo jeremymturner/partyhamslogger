@@ -23,6 +23,10 @@ _DESCRIPTION_LIMIT = 4096
 _FIELD_LIMIT = 1024
 _EMBED_COLOR = 0x2ECC71  # green
 
+#: Discord sits behind Cloudflare, which 403s the default ``Python-urllib`` agent —
+#: we must send an explicit, identifying User-Agent on the webhook POST.
+_USER_AGENT = "PartyHamsLogger-release-notifier (+https://github.com/jeremymturner/partyhamslogger)"
+
 #: A ``fetch`` takes ``(url, headers)`` and returns the decoded JSON object.
 Fetch = Callable[[str, dict[str, str]], dict]
 #: A ``post`` takes ``(url, json_payload)`` and returns the HTTP status code.
@@ -92,11 +96,20 @@ def _http_get_json(url: str, headers: dict[str, str]) -> dict:
         return json.loads(resp.read().decode())
 
 
-def _http_post_json(url: str, payload: dict) -> int:
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+def build_post_request(url: str, payload: dict) -> urllib.request.Request:
+    """Build the Discord webhook POST request. Sets an explicit User-Agent —
+    without it Cloudflare (in front of discord.com) rejects the default
+    ``Python-urllib`` agent with HTTP 403."""
+    return urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": _USER_AGENT},
+        method="POST",
     )
+
+
+def _http_post_json(url: str, payload: dict) -> int:
+    req = build_post_request(url, payload)
     with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 (trusted webhook URL)
         return resp.status
 
