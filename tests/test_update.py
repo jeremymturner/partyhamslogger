@@ -83,3 +83,142 @@ def test_check_for_update_falls_back_to_release_page_without_matching_asset():
     info = check_for_update("0.0.4", fetch=lambda *_: rel, system="Windows")
     assert info is not None
     assert info.url == rel["html_url"]
+
+
+# --- interval clamp, asset URL detection ---------------------------------------
+
+
+def test_clamp_interval_hours():
+    from partyhams.app.update import clamp_interval_hours
+
+    assert clamp_interval_hours(1) == 1
+    assert clamp_interval_hours(0) == 1  # floor: 1 hour
+    assert clamp_interval_hours(9999) == 168  # ceiling: 7 days
+    assert clamp_interval_hours(24) == 24
+
+
+def test_is_asset_url():
+    from partyhams.app.update import is_asset_url
+
+    assert is_asset_url("https://x/PartyHamsLogger-v1-windows-x64.zip")
+    assert is_asset_url("https://x/PartyHamsLogger-v1-linux-x64.tar.gz")
+    assert not is_asset_url("https://github.com/o/r/releases/tag/v1")
+
+
+# --- streaming download --------------------------------------------------------
+
+
+class _FakeResp:
+    def __init__(self, data: bytes, total: int | None = None):
+        self._chunks = [data[i : i + 3] for i in range(0, len(data), 3)]
+        self.headers = {"Content-Length": str(len(data) if total is None else total)}
+
+    def read(self, _n):
+        return self._chunks.pop(0) if self._chunks else b""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_a):
+        return False
+
+
+def test_download_asset_streams_and_reports_progress(tmp_path):
+    from partyhams.app.update import download_asset
+
+    seen = []
+    out = download_asset(
+        "https://x/PartyHamsLogger-v1-linux-x64.tar.gz",
+        tmp_path,
+        progress=lambda r, t: seen.append((r, t)),
+        opener=lambda _u: _FakeResp(b"abcdefg"),
+    )
+    assert out.read_bytes() == b"abcdefg"
+    assert out.name.endswith("linux-x64.tar.gz")
+    assert seen[-1] == (7, 7)  # final progress = full size
+
+
+# --- archive extraction --------------------------------------------------------
+
+
+def test_extract_bundle_zip_and_targz(tmp_path):
+    import tarfile
+    import zipfile
+
+    from partyhams.app.update import extract_bundle
+
+    zpath = tmp_path / "win.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("PartyHamsLogger/PartyHamsLogger.exe", b"binary")
+        zf.writestr("PartyHamsLogger/data.txt", b"x")
+    bundle = extract_bundle(zpath, tmp_path / "z")
+    assert bundle == tmp_path / "z" / "PartyHamsLogger"
+    assert (bundle / "PartyHamsLogger.exe").exists()
+
+    src = tmp_path / "PartyHamsLogger"
+    (src).mkdir()
+    (src / "PartyHamsLogger").write_bytes(b"binary")
+    tpath = tmp_path / "linux.tar.gz"
+    with tarfile.open(tpath, "w:gz") as tf:
+        tf.add(src, arcname="PartyHamsLogger")
+    bundle2 = extract_bundle(tpath, tmp_path / "t")
+    assert bundle2 == tmp_path / "t" / "PartyHamsLogger"
+    assert (bundle2 / "PartyHamsLogger").exists()
+
+
+# --- install location, relaunch command, swap script --------------------------
+
+
+def test_install_root_per_platform():
+    from pathlib import Path
+
+    from partyhams.app.update import install_root
+
+    mac = install_root("/Applications/PartyHamsLogger.app/Contents/MacOS/PartyHamsLogger", "Darwin")
+    assert mac == Path("/Applications/PartyHamsLogger.app")
+    linux = install_root("/opt/PartyHamsLogger/PartyHamsLogger", "Linux")
+    assert linux == Path("/opt/PartyHamsLogger")
+
+
+def test_relaunch_command_per_platform():
+    from partyhams.app.update import relaunch_command
+
+    assert relaunch_command("/A/Foo.app", "Darwin") == ["open", "/A/Foo.app"]
+    assert relaunch_command("/opt/PartyHamsLogger", "Linux")[0].endswith("PartyHamsLogger")
+    assert relaunch_command("C:/app", "Windows")[0].endswith("PartyHamsLogger.exe")
+
+
+def test_swap_script_unix_and_windows():
+    from partyhams.app.update import swap_script
+
+    suffix, text = swap_script("linux", 4242, "/opt/app", "/tmp/new", ["/opt/app/PartyHamsLogger"])
+    assert suffix == ".sh"
+    assert "kill -0 4242" in text and 'rm -rf "/opt/app"' in text and 'mv "/tmp/new"' in text
+
+    suffix, text = swap_script(
+        "windows", 99, r"C:\app", r"C:\tmp\new", [r"C:\app\PartyHamsLogger.exe"]
+    )
+    assert suffix == ".bat"
+    assert "tasklist" in text and "rmdir /s /q" in text and "move" in text and "start" in text
+
+
+def test_apply_update_writes_script_and_invokes_runner(tmp_path):
+    from partyhams.app.update import apply_update
+
+    captured = {}
+
+    def fake_runner(system, script_path):
+        captured["system"] = system
+        captured["script"] = script_path
+
+    apply_update(
+        tmp_path / "new-bundle",
+        app_root=tmp_path / "installed",
+        pid=1234,
+        system="linux",
+        runner=fake_runner,
+    )
+    assert captured["system"] == "linux"
+    body = open(captured["script"]).read()
+    assert "kill -0 1234" in body
+    assert str(tmp_path / "installed") in body

@@ -27,9 +27,14 @@ Enter logs the QSO.
   readout (frequency, band, and — with a CAT radio — mode), the WSJT-X transmit
   period (EVEN/ODD) while WSJT-X drives a data mode, and the connected radio (or
   "No radio (manual)"), plus transient messages.
-- **Update available** — PartyHams checks GitHub for new releases once an hour. If
-  a newer version is out, a green **⬇** appears in the status bar; hover to see the
-  version and click it to download the build for your platform.
+- **Update available** — PartyHams checks GitHub for new releases periodically. If a
+  newer version is out, a green **⬇** appears in the status bar; hover to see the
+  version and click it to download and install it **in-app** — a progress bar shows
+  in the status bar, and the app offers to restart into the new version when ready.
+  Tune this in **Tools → Update Settings…**: turn the check on/off (privacy
+  opt-out), set how often it runs (1 hour to 7 days), or check right now. **Tools →
+  Check for Updates…** also triggers a check on demand. (In-app install applies to
+  the packaged app; from a source checkout the build is just downloaded for you.)
 - **Network dock** — the [Network panel](network-panel.md) docks on the right.
 
 ## Keyboard flow

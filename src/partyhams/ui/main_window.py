@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -46,7 +47,15 @@ from partyhams.app.macros import (
 )
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, default_rst
-from partyhams.app.update import check_for_update
+from partyhams.app.update import (
+    apply_update,
+    check_for_update,
+    clamp_interval_hours,
+    download_asset,
+    extract_bundle,
+    is_asset_url,
+    is_frozen,
+)
 from partyhams.core.models import (
     QSO,
     Band,
@@ -291,17 +300,27 @@ class MainWindow(QMainWindow):
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
         )
         self._radio_status_label.setMinimumWidth(240)
-        # A green ⬇ appears here when a newer release is available (click to get it).
+        # Auto-update state (configured by the app from AppState via set_auto_update).
+        self._auto_update_enabled = True
+        self._auto_update_interval_hours = 1
+        self.on_change_auto_update: Callable[[bool, int], None] | None = None
+        self._update_info = None  # the available UpdateInfo, once found
+        self._update_downloading = False
+        # A green ⬇ appears here when a newer release is available (click to install).
         self._update_btn = QPushButton("⬇")
         self._update_btn.setFlat(True)
         self._update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._update_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._update_btn.setVisible(False)
-        self._update_btn.clicked.connect(self._open_update_download)
+        self._update_btn.clicked.connect(self._start_update)
         self._style_update_btn()
-        self._update_url: str | None = None
-        # Left-to-right in the right-aligned permanent area: update indicator,
-        # frequency/band/mode, then the WSJT-X EVEN/ODD period, then the radio.
+        # Download progress, shown in the status bar only while a download runs.
+        self._download_bar = QProgressBar()
+        self._download_bar.setMaximumWidth(180)
+        self._download_bar.setVisible(False)
+        # Left-to-right in the right-aligned permanent area: download bar, update
+        # indicator, frequency/band/mode, then the WSJT-X period, then the radio.
+        self.statusBar().addPermanentWidget(self._download_bar)
         self.statusBar().addPermanentWidget(self._update_btn)
         self.statusBar().addPermanentWidget(self._freq)
         self.statusBar().addPermanentWidget(self._tx_period)
@@ -434,54 +453,184 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(self._qrz.last_error, 4000)
 
     # ------------------------------------------------------------------ #
-    # update check (hourly, background)
+    # update check (periodic, background) + in-app download/install
     # ------------------------------------------------------------------ #
     def _setup_update_check(self) -> None:
-        """Check GitHub for a newer release now (shortly after launch) and hourly."""
+        """Start the periodic release check and run an initial check after launch."""
         self._update_timer = QTimer(self)
-        self._update_timer.setInterval(60 * 60 * 1000)  # once an hour
         self._update_timer.timeout.connect(self._check_for_update)
-        self._update_timer.start()
-        QTimer.singleShot(5000, self._check_for_update)  # initial check ~5s after launch
+        self._apply_update_schedule()
+        QTimer.singleShot(5000, self._check_for_update)  # initial check ~5s in
+
+    def set_auto_update(self, enabled: bool, interval_hours: int) -> None:
+        """Apply the saved auto-update preference (enable + interval, 1h..7d)."""
+        self._auto_update_enabled = enabled
+        self._auto_update_interval_hours = clamp_interval_hours(interval_hours)
+        self._apply_update_schedule()
+
+    def _apply_update_schedule(self) -> None:
+        if not hasattr(self, "_update_timer"):
+            return
+        if self._auto_update_enabled:
+            self._update_timer.start(self._auto_update_interval_hours * 60 * 60 * 1000)
+        else:
+            self._update_timer.stop()
+
+    def _edit_update_settings(self) -> None:
+        from partyhams.ui.update_dialog import UpdateSettingsDialog
+
+        dialog = UpdateSettingsDialog(
+            self._auto_update_enabled,
+            self._auto_update_interval_hours,
+            on_check_now=lambda: self._check_for_update(force=True),
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            enabled, hours = dialog.settings()
+            self.set_auto_update(enabled, hours)
+            if self.on_change_auto_update is not None:
+                self.on_change_auto_update(enabled, hours)  # app persists it
 
     def _style_update_btn(self) -> None:
         self._update_btn.setStyleSheet(
             f"QPushButton {{ color: {style.MULT}; font-weight: 800; border: none; }}"
         )
 
-    def _check_for_update(self) -> None:
+    def _check_for_update(self, *, force: bool = False) -> None:
+        """Kick off a background check. ``force`` (the manual button) runs even when
+        auto-update is disabled and reports 'up to date'."""
+        if not force and not self._auto_update_enabled:
+            return
         if self._loop is None or not self._loop.is_running():
             return  # no loop (tests) -> skip the network call
-        self._loop.create_task(self._do_check_for_update())
+        self._loop.create_task(self._do_check_for_update(force=force))
 
-    async def _do_check_for_update(self) -> None:
+    async def _do_check_for_update(self, *, force: bool = False) -> None:
         """Look up the latest release off the UI thread; show the ⬇ if it's newer."""
         from partyhams import __version__
 
+        if force:
+            self.statusBar().showMessage("Checking for updates…", 2000)
         try:
             info = await asyncio.get_event_loop().run_in_executor(
                 None, check_for_update, __version__
             )
-        except Exception:  # noqa: BLE001 - a failed check is non-fatal; just try again later
+        except Exception as exc:  # noqa: BLE001 - a failed check is non-fatal
+            if force:
+                self.statusBar().showMessage(f"Update check failed: {exc}", 4000)
             return
         if info is not None:
             self._show_update_available(info)
+        elif force:
+            self.statusBar().showMessage(f"You're up to date (v{__version__}).", 4000)
 
     def _show_update_available(self, info) -> None:
-        self._update_url = info.url
-        self._update_btn.setToolTip(
-            f"Version {info.version} is available — click to download"
-        )
+        self._update_info = info
+        self._update_btn.setToolTip(f"Version {info.version} is available — click to install")
         self._update_btn.setVisible(True)
 
-    def _open_update_download(self) -> None:
-        if not self._update_url:
+    # --- download + install ---
+    def _start_update(self) -> None:
+        """⬇ clicked: confirm, then download + install the new version in-app."""
+        info = self._update_info
+        if info is None or self._update_downloading:
             return
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtWidgets import QMessageBox
 
-        QDesktopServices.openUrl(QUrl(self._update_url))
-        self.statusBar().showMessage("Opening the download in your browser…", 4000)
+        confirm = QMessageBox.question(
+            self,
+            "Download update",
+            f"Download and install version {info.version}?\n\n"
+            "The app will restart into the new version when it's ready.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        if not is_asset_url(info.url):
+            # No build for this platform — fall back to the release page in a browser.
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+
+            QDesktopServices.openUrl(QUrl(info.url))
+            return
+        if self._loop is None or not self._loop.is_running():
+            return
+        self._update_downloading = True
+        self._update_btn.setVisible(False)
+        self._download_bar.setRange(0, 100)
+        self._download_bar.setValue(0)
+        self._download_bar.setVisible(True)
+        self.statusBar().showMessage(f"Downloading version {info.version}…", 0)
+        self._loop.create_task(self._do_download_and_install(info))
+
+    def _on_download_progress(self, received: int, total: int) -> None:
+        if total > 0:
+            self._download_bar.setRange(0, 100)
+            self._download_bar.setValue(int(received * 100 / total))
+        else:
+            self._download_bar.setRange(0, 0)  # indeterminate (no Content-Length)
+
+    async def _do_download_and_install(self, info) -> None:
+        import tempfile
+
+        from PySide6.QtCore import QObject, Signal
+
+        class _Signaller(QObject):
+            progress = Signal(int, int)
+
+        signaller = _Signaller()
+        signaller.progress.connect(self._on_download_progress)
+        loop = asyncio.get_event_loop()
+        tmp = Path(tempfile.mkdtemp(prefix="partyhams-update-"))
+        try:
+            archive = await loop.run_in_executor(
+                None,
+                lambda: download_asset(
+                    info.url, tmp, progress=lambda r, t: signaller.progress.emit(r, t)
+                ),
+            )
+            bundle = await loop.run_in_executor(None, lambda: extract_bundle(archive, tmp))
+        except Exception as exc:  # noqa: BLE001 - surface the failure, let them retry
+            self._download_bar.setVisible(False)
+            self._update_downloading = False
+            self._update_btn.setVisible(True)
+            self.statusBar().showMessage(f"Update download failed: {exc}", 6000)
+            return
+        self._download_bar.setVisible(False)
+        self.statusBar().clearMessage()
+        self._finish_update(info, bundle)
+
+    def _finish_update(self, info, bundle: Path) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        if not is_frozen():
+            # A source checkout can't replace itself — leave the build for the user.
+            QMessageBox.information(
+                self,
+                "Update downloaded",
+                f"Version {info.version} was downloaded to:\n{bundle}\n\n"
+                "Self-install only works in a packaged build; from a source checkout, "
+                "run it from there.",
+            )
+            self._update_downloading = False
+            return
+        restart = QMessageBox.question(
+            self,
+            "Install update",
+            f"Version {info.version} is ready. Restart now to finish installing?",
+        )
+        if restart != QMessageBox.StandardButton.Yes:
+            self._update_downloading = False
+            self.statusBar().showMessage("Update will install on the next restart.", 5000)
+            return
+        try:
+            apply_update(bundle)  # spawns a detached helper that swaps + relaunches
+        except Exception as exc:  # noqa: BLE001
+            self._update_downloading = False
+            self.statusBar().showMessage(f"Install failed: {exc}", 6000)
+            return
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.quit()  # let the helper take over
 
     def _auto_export_adif(self) -> None:
         path = getattr(self.session.store, "path", ":memory:")
@@ -1062,6 +1211,13 @@ class MainWindow(QMainWindow):
         ref_menu.addAction("Import LoTW users…", self._import_lotw)
         ref_menu.addAction("Import eQSL users…", self._import_eqsl)
         ref_menu.addAction("Import QRZ users…", self._import_qrz)
+        tools_menu.addSeparator()
+        tools_menu.addAction(
+            "Check for Updates…", lambda: self._check_for_update(force=True)
+        ).setStatusTip("Check GitHub for a newer release now")
+        tools_menu.addAction("Update Settings…", self._edit_update_settings).setStatusTip(
+            "Turn the auto-update check on/off and set how often it runs"
+        )
 
         help_menu = self.menuBar().addMenu("Help")
         guide = help_menu.addAction("User Guide…", self._show_help)
