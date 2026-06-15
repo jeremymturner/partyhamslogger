@@ -53,6 +53,7 @@ COMMANDS: list[tuple[str, str]] = [
 OPERATING: list[tuple[str, str]] = [
     ("F1 – F12", "Send the F-key macro for the current Run / S&P bank"),
     ("Enter", "Log the QSO / advance to the next field (ESM: send the next message)"),
+    ("↑ / ↓", "Raise / lower the CW keyer speed (WPM)"),
     ("Esc", "Emergency stop transmitting"),
 ]
 

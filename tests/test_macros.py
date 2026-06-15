@@ -94,3 +94,13 @@ def test_load_defaults_and_round_trip(tmp_path):
 def test_macroset_get_missing():
     ms = MacroSet()
     assert ms.get("CW", 1) is None
+
+
+def test_clamp_wpm_bounds():
+    from partyhams.app.macros import WPM_MAX, WPM_MIN, clamp_wpm
+
+    assert clamp_wpm(24) == 24
+    assert clamp_wpm(WPM_MIN - 5) == WPM_MIN
+    assert clamp_wpm(WPM_MAX + 99) == WPM_MAX
+    assert clamp_wpm(WPM_MIN) == WPM_MIN
+    assert clamp_wpm(WPM_MAX) == WPM_MAX

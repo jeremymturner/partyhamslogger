@@ -35,7 +35,15 @@ from PySide6.QtWidgets import (
 )
 
 from partyhams.app.banter import StationSnapshot, choose_message
-from partyhams.app.macros import bank_key, esm_step, expand, load_macros, save_macros
+from partyhams.app.macros import (
+    CW_WPM_PRESETS,
+    bank_key,
+    clamp_wpm,
+    esm_step,
+    expand,
+    load_macros,
+    save_macros,
+)
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, default_rst
 from partyhams.core.models import (
@@ -266,6 +274,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._build_log_table(), stretch=1)
         self._fkey_bar = self._build_fkey_bar()
         layout.addWidget(self._fkey_bar)
+        self._cw_bar = self._build_cw_bar()
+        layout.addWidget(self._cw_bar)
         self._wsjtx_panel = WsjtxPanel()
         self._wsjtx_panel.setVisible(False)
         layout.addWidget(self._wsjtx_panel)
@@ -602,6 +612,84 @@ class MainWindow(QMainWindow):
             else:
                 btn.setStyleSheet("")
 
+    # ------------------------------------------------------------------ #
+    # CW speed bar (issue #4): quick WPM presets + a live keyboard sender
+    # ------------------------------------------------------------------ #
+    def _build_cw_bar(self) -> QWidget:
+        """Below the F-key bar: quick CW-speed presets, the current WPM, and a live
+        keyboard sender. Up/Down (from the entry or keyboard fields) nudge the speed
+        by 1 WPM; the keyboard field sends each character as it's typed and Enter
+        clears it. Only shown in CW mode (see _update_bottom_bars)."""
+        bar = QWidget()
+        hbox = QHBoxLayout(bar)
+        hbox.setContentsMargins(2, 2, 2, 2)
+        hbox.setSpacing(3)
+
+        hbox.addWidget(QLabel("CW"))
+        self._wpm_buttons: dict[int, QPushButton] = {}
+        for wpm in CW_WPM_PRESETS:
+            btn = QPushButton(f"{wpm}")
+            btn.setObjectName("fkey")
+            btn.setMinimumHeight(32)
+            btn.setFixedWidth(48)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # keep focus in the entry fields
+            btn.clicked.connect(lambda _checked=False, w=wpm: self._set_wpm(w))
+            self._wpm_buttons[wpm] = btn
+            hbox.addWidget(btn)
+
+        self._wpm_label = QLabel()
+        self._wpm_label.setMinimumWidth(64)
+        hbox.addWidget(self._wpm_label)
+
+        # Live CW keyboard: sends as you type, Enter clears. Kept out of
+        # _entry_fields so Space/Tab/Enter behave as text + clear (not field nav).
+        self._cw_kbd_sent = ""  # text already streamed to the keyer this line
+        self._cw_keyboard = QLineEdit()
+        self._cw_keyboard.setPlaceholderText("Type to send CW…  (Enter clears)")
+        self._cw_keyboard.textEdited.connect(self._on_cw_keyboard_edited)
+        self._cw_keyboard.returnPressed.connect(self._clear_cw_keyboard)
+        self._cw_keyboard.installEventFilter(self)  # Up/Down -> change WPM
+        hbox.addWidget(self._cw_keyboard, stretch=1)
+        return bar
+
+    def _set_wpm(self, wpm: int) -> None:
+        """Set the CW keyer speed, persist it with the event's macros, and (if a
+        keyer is connected) push it to the rig so it takes effect immediately."""
+        wpm = clamp_wpm(wpm)
+        if wpm == self._macros.cw_wpm:
+            self._update_cw_bar()
+            return
+        self._macros.cw_wpm = wpm
+        save_macros(self.session.contest.id, self._macros)
+        self._update_cw_bar()
+        self.statusBar().showMessage(f"CW speed {wpm} WPM", 1500)
+
+    def _bump_wpm(self, delta: int) -> None:
+        self._set_wpm(self._macros.cw_wpm + delta)
+
+    def _update_cw_bar(self) -> None:
+        wpm = self._macros.cw_wpm
+        self._wpm_label.setText(f"{wpm} WPM")
+        # Outline the preset matching the current speed (if any).
+        for preset, btn in self._wpm_buttons.items():
+            btn.setStyleSheet(
+                f"QPushButton#fkey {{ border: 2px solid {style.MULT}; }}"
+                if preset == wpm
+                else ""
+            )
+
+    def _on_cw_keyboard_edited(self, text: str) -> None:
+        """Send only the characters newly appended since the last edit, so live
+        typing streams to the keyer one chunk at a time. A deletion or mid-line
+        edit can't be un-sent — it just resyncs the tracker, no send."""
+        if text.startswith(self._cw_kbd_sent) and len(text) > len(self._cw_kbd_sent):
+            self._send_cw(text[len(self._cw_kbd_sent) :].upper())
+        self._cw_kbd_sent = text
+
+    def _clear_cw_keyboard(self) -> None:
+        self._cw_keyboard.clear()
+        self._cw_kbd_sent = ""
+
     def _macro_context(self) -> dict[str, str]:
         sent = self.session.config.sent_exchange
         ctx = {
@@ -703,6 +791,17 @@ class MainWindow(QMainWindow):
                 return True
             if key in (Qt.Key.Key_Space, Qt.Key.Key_Tab):
                 self._advance_entry_field(obj, +1)
+                return True
+        # Up/Down nudge the CW speed from the entry fields or the live CW keyboard
+        # (single-line edits don't use vertical arrows, so nothing is shadowed).
+        if event.type() == QEvent.Type.KeyPress and (
+            obj in self._entry_fields or obj is self._cw_keyboard
+        ):
+            if event.key() == Qt.Key.Key_Up:
+                self._bump_wpm(+1)
+                return True
+            if event.key() == Qt.Key.Key_Down:
+                self._bump_wpm(-1)
                 return True
         return super().eventFilter(obj, event)
 
@@ -834,6 +933,7 @@ class MainWindow(QMainWindow):
             self._macros = dialog.result_macroset()
             save_macros(self.session.contest.id, self._macros)
             self._update_fkey_bar()
+            self._update_cw_bar()  # the dialog can change the CW speed too
 
     def _build_menu(self) -> None:
         logs_menu = self.menuBar().addMenu("Logs")
@@ -1131,6 +1231,9 @@ class MainWindow(QMainWindow):
         self._wsjtx_panel.setVisible(self._wsjtx_active)
         macro_mode = self._current_mode() in (Mode.CW, Mode.USB, Mode.LSB)
         self._fkey_bar.setVisible(macro_mode and not self._wsjtx_active)
+        # CW speed + keyboard sender only apply to CW.
+        self._cw_bar.setVisible(self._current_mode() == Mode.CW and not self._wsjtx_active)
+        self._update_cw_bar()
 
     def _maybe_highlight(self, decode: Decode) -> None:
         """Best-effort: tell WSJT-X to color CQ candidates whose section we need.
