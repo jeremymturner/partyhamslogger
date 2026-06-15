@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from partyhams.notify.discord import announce_release, build_payload, fetch_release
+from partyhams.notify.discord import (
+    announce_release,
+    build_payload,
+    build_post_request,
+    fetch_release,
+)
 
 REPO = "jeremymturner/partyhamslogger"
 
@@ -103,3 +108,13 @@ def test_announce_release_fetches_then_posts():
     assert calls["post_url"] == "https://discord.invalid/webhook"
     assert calls["payload"]["content"] == "@everyone"
     assert "v0.0.4" in calls["payload"]["embeds"][0]["title"]
+
+
+def test_build_post_request_sets_user_agent_to_dodge_cloudflare_403():
+    # discord.com is behind Cloudflare, which 403s the default Python-urllib agent.
+    req = build_post_request("https://discord.invalid/webhook", {"content": "hi"})
+    assert req.get_method() == "POST"
+    assert req.get_header("User-agent")  # must be present and non-empty
+    assert "python-urllib" not in req.get_header("User-agent").lower()
+    assert req.get_header("Content-type") == "application/json"
+    assert b'"content"' in req.data
