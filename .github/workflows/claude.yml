@@ -26,6 +26,7 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
+  id-token: write  # the action exchanges a GitHub OIDC token for a Claude-App token
 
 jobs:
   # Auto-investigate every newly filed issue.
