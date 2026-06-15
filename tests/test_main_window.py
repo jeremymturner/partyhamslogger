@@ -701,3 +701,34 @@ def test_call_history_unknown_call_leaves_exchange_alone(tmp_path):
     w._call.setText("W9NONE")
     assert w._exchange_edits["class"].text() == ""
     assert w._exchange_edits["section"].text() == ""
+
+
+# --- update indicator (auto-update check) -------------------------------------
+
+
+def test_update_indicator_hidden_until_available_then_opens_download(monkeypatch):
+    from partyhams.app.update import UpdateInfo
+
+    w = _window()
+    assert w._update_btn.isHidden()  # nothing to show on a fresh window
+
+    w._show_update_available(
+        UpdateInfo(
+            version="0.1.0",
+            tag="v0.1.0",
+            name="PartyHams Logger v0.1.0",
+            url="https://example.invalid/win.zip",
+            notes="",
+        )
+    )
+    assert not w._update_btn.isHidden()
+    assert "0.1.0" in w._update_btn.toolTip()
+
+    # Clicking opens the download URL in the browser.
+    opened = {}
+    monkeypatch.setattr(
+        "PySide6.QtGui.QDesktopServices.openUrl",
+        lambda url: opened.setdefault("url", url.toString()),
+    )
+    w._open_update_download()
+    assert opened["url"] == "https://example.invalid/win.zip"

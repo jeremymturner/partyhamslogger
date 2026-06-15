@@ -46,6 +46,7 @@ from partyhams.app.macros import (
 )
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import LogSession, default_rst
+from partyhams.app.update import check_for_update
 from partyhams.core.models import (
     QSO,
     Band,
@@ -290,8 +291,18 @@ class MainWindow(QMainWindow):
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
         )
         self._radio_status_label.setMinimumWidth(240)
-        # Left-to-right in the right-aligned permanent area: frequency/band/mode,
-        # then the WSJT-X EVEN/ODD period, then the radio indicator.
+        # A green ⬇ appears here when a newer release is available (click to get it).
+        self._update_btn = QPushButton("⬇")
+        self._update_btn.setFlat(True)
+        self._update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._update_btn.setVisible(False)
+        self._update_btn.clicked.connect(self._open_update_download)
+        self._style_update_btn()
+        self._update_url: str | None = None
+        # Left-to-right in the right-aligned permanent area: update indicator,
+        # frequency/band/mode, then the WSJT-X EVEN/ODD period, then the radio.
+        self.statusBar().addPermanentWidget(self._update_btn)
         self.statusBar().addPermanentWidget(self._freq)
         self.statusBar().addPermanentWidget(self._tx_period)
         self.statusBar().addPermanentWidget(self._radio_status_label)
@@ -302,6 +313,7 @@ class MainWindow(QMainWindow):
         self._setup_auto_export()
         self._setup_autocq()
         self._setup_qrz()
+        self._setup_update_check()
         self._call.setFocus()
         self.refresh()
 
@@ -420,6 +432,56 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(format_record(record), 8000)
         elif self._qrz.last_error:
             self.statusBar().showMessage(self._qrz.last_error, 4000)
+
+    # ------------------------------------------------------------------ #
+    # update check (hourly, background)
+    # ------------------------------------------------------------------ #
+    def _setup_update_check(self) -> None:
+        """Check GitHub for a newer release now (shortly after launch) and hourly."""
+        self._update_timer = QTimer(self)
+        self._update_timer.setInterval(60 * 60 * 1000)  # once an hour
+        self._update_timer.timeout.connect(self._check_for_update)
+        self._update_timer.start()
+        QTimer.singleShot(5000, self._check_for_update)  # initial check ~5s after launch
+
+    def _style_update_btn(self) -> None:
+        self._update_btn.setStyleSheet(
+            f"QPushButton {{ color: {style.MULT}; font-weight: 800; border: none; }}"
+        )
+
+    def _check_for_update(self) -> None:
+        if self._loop is None or not self._loop.is_running():
+            return  # no loop (tests) -> skip the network call
+        self._loop.create_task(self._do_check_for_update())
+
+    async def _do_check_for_update(self) -> None:
+        """Look up the latest release off the UI thread; show the ⬇ if it's newer."""
+        from partyhams import __version__
+
+        try:
+            info = await asyncio.get_event_loop().run_in_executor(
+                None, check_for_update, __version__
+            )
+        except Exception:  # noqa: BLE001 - a failed check is non-fatal; just try again later
+            return
+        if info is not None:
+            self._show_update_available(info)
+
+    def _show_update_available(self, info) -> None:
+        self._update_url = info.url
+        self._update_btn.setToolTip(
+            f"Version {info.version} is available — click to download"
+        )
+        self._update_btn.setVisible(True)
+
+    def _open_update_download(self) -> None:
+        if not self._update_url:
+            return
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        QDesktopServices.openUrl(QUrl(self._update_url))
+        self.statusBar().showMessage("Opening the download in your browser…", 4000)
 
     def _auto_export_adif(self) -> None:
         path = getattr(self.session.store, "path", ":memory:")
@@ -1331,6 +1393,7 @@ class MainWindow(QMainWindow):
         """Re-apply palette-derived inline styles after a live theme change."""
         # The shared dupe/mult badge is re-styled (palette-aware) by refresh() below.
         self._freq.setStyleSheet(f"color: {style.ACCENT}; font-weight: 600;")
+        self._style_update_btn()
         self._update_fkey_bar()
         self._update_radio_label()
         self._panel.restyle()
