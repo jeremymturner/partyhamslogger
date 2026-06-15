@@ -237,6 +237,8 @@ def run() -> int:
             window.set_wsjtx(state.wsjtx_enabled, state.wsjtx_port, state.wsjtx_host)
             window.on_change_qrz = _change_qrz
             window.set_qrz_credentials(state.qrz_username, state.qrz_password)
+            window.on_change_auto_update = _change_auto_update
+            window.set_auto_update(state.auto_update_enabled, state.auto_update_interval_hours)
             window.show()
             ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
             window.set_poller(ctx["poller"])
@@ -355,6 +357,12 @@ def run() -> int:
     def _change_qrz(username: str, password: str) -> None:
         state.qrz_username = username
         state.qrz_password = password
+        save_state(state)
+
+    # --- auto-update preference (persisted) ---
+    def _change_auto_update(enabled: bool, interval_hours: int) -> None:
+        state.auto_update_enabled = enabled
+        state.auto_update_interval_hours = interval_hours
         save_state(state)
 
     # --- theme change (live) ---

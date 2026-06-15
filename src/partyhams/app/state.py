@@ -55,6 +55,10 @@ class AppState:
     #: QRZ.com XML-API credentials for callsign lookups (empty => disabled).
     qrz_username: str = ""
     qrz_password: str = ""
+    #: Whether to periodically check GitHub for a newer release (privacy opt-out).
+    auto_update_enabled: bool = True
+    #: How often to check for updates, in hours (clamped to 1 hour .. 7 days).
+    auto_update_interval_hours: int = 1
 
 
 def load_state(path: Path = STATE_FILE) -> AppState:
@@ -78,6 +82,8 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         wsjtx_host=data.get("wsjtx_host", ""),
         qrz_username=data.get("qrz_username", ""),
         qrz_password=data.get("qrz_password", ""),
+        auto_update_enabled=data.get("auto_update_enabled", True),
+        auto_update_interval_hours=data.get("auto_update_interval_hours", 1),
     )
 
 
@@ -99,6 +105,8 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "wsjtx_host": state.wsjtx_host,
         "qrz_username": state.qrz_username,
         "qrz_password": state.qrz_password,
+        "auto_update_enabled": state.auto_update_enabled,
+        "auto_update_interval_hours": state.auto_update_interval_hours,
     }
     path.write_text(json.dumps(payload, indent=2))
 
