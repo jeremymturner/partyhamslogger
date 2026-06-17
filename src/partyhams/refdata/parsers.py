@@ -16,7 +16,11 @@ from collections.abc import Iterable
 _CALL_RE = re.compile(r"^(?=[A-Z0-9/]*[0-9])[A-Z0-9]+(?:/[A-Z0-9]+)*$")
 
 #: Common N1MM call-history column names mapped to our exchange field keys.
-_HISTORY_ALIASES = {"sect": "section"}
+#: N1MM names the section column ``Sect`` and parks the contest-specific exchange
+#: (e.g. the Field Day class) in ``Exch1`` — neither matches our field names, so
+#: bridge them here. An alias only takes effect if the active contest actually has
+#: the target field, so ``exch1→class`` is a no-op for contests without a class.
+_HISTORY_ALIASES = {"sect": "section", "exch1": "class"}
 
 
 def _clean_lines(text: str) -> list[str]:

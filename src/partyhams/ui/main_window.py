@@ -1635,11 +1635,34 @@ class MainWindow(QMainWindow):
 
     def _import_call_history(self) -> None:
         text = self._pick_refdata_file("Import Call History")
-        if text is not None:
-            fields = [f.name for f in self.session.contest.exchange_fields()]
-            count = self._refdata.import_call_history(text, fields)
-            self.statusBar().showMessage(f"Loaded {count} call-history entries", 4000)
-            self._autofill_from_history()  # apply to the call already in the box
+        if text is None:
+            return
+        fields = [f.name for f in self.session.contest.exchange_fields()]
+        count = self._refdata.import_call_history(text, fields)
+        # Report which exchange fields the file actually populated, so a column-name
+        # mismatch (e.g. an N1MM file whose columns we don't recognize) is obvious
+        # instead of looking like a silent success — see issue #19.
+        filled = {k for rec in self._refdata.history.values() for k in rec}
+        ordered = [f.name for f in self.session.contest.exchange_fields() if f.name in filled]
+        if count and ordered:
+            self.statusBar().showMessage(
+                f"Loaded {count} call-history entries · filled {', '.join(ordered)}", 6000
+            )
+        else:
+            from PySide6.QtWidgets import QMessageBox
+
+            expected = ", ".join(f.name for f in self.session.contest.exchange_fields())
+            QMessageBox.warning(
+                self,
+                "Call History",
+                f"Imported the file but recognized no usable exchange data "
+                f"({count} entries).\n\n"
+                f"Columns are matched to this contest's exchange fields ({expected}). "
+                f"N1MM files use 'Sect' for the section and 'Exch1' for the class; "
+                f"make sure your file's header names those columns and that you've "
+                f"selected the right contest before importing.",
+            )
+        self._autofill_from_history()  # apply to the call already in the box
 
     def _import_lotw(self) -> None:
         text = self._pick_refdata_file("Import LoTW users")
