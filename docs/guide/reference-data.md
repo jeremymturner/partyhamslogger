@@ -23,7 +23,8 @@ you. Two layouts are accepted:
 
 - **N1MM Call History** — the standard format whose first line is
   `!!Order!!,Call,Sect,…`; existing community/club files work as-is. The `Sect`
-  column maps to the Section field.
+  column maps to the Section field and `Exch1` to the Class field (so a standard
+  N1MM Field Day file fills both).
 - **Simple CSV** — a header row whose first column is `Call`, followed by columns
   named after the contest's exchange fields, e.g.:
 

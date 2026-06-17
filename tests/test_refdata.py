@@ -117,6 +117,21 @@ def test_parse_call_history_simple_csv():
     }
 
 
+def test_parse_call_history_n1mm_exch1_maps_to_class():
+    # A real N1MM Field Day file names the class column "Exch1" (not "Class") and
+    # the section "Sect"; both must resolve so the exchange autofills (issue #19).
+    text = "!!Order!!,Call,Exch1,Sect\nK1ABC,2A,EMA\nW7XYZ,3A,OR\n"
+    assert parse_call_history(text, FD_FIELDS) == {
+        "K1ABC": {"class": "2A", "section": "EMA"},
+        "W7XYZ": {"class": "3A", "section": "OR"},
+    }
+
+
+def test_parse_call_history_exch1_alias_inert_without_class_field():
+    # The exch1->class alias only resolves when the contest has a "class" field.
+    assert parse_call_history("Call,Exch1\nK1ABC,2A\n", {"park"}) == {}
+
+
 def test_parse_call_history_drops_entries_with_no_known_fields():
     # Fields for a different contest -> no columns resolve -> nothing kept.
     assert parse_call_history(CSV_HISTORY, {"park"}) == {}
