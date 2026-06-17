@@ -36,6 +36,8 @@ from collections.abc import Callable
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from partyhams.core.certs import ssl_context
+
 # A fetch takes a URL and returns the raw response body as text.
 Fetch = Callable[[str], str]
 
@@ -45,8 +47,9 @@ _TIMEOUT_S = 6.0
 
 
 def _default_fetch(url: str) -> str:
-    """Fetch ``url`` over HTTPS using only the standard library (no new deps)."""
-    with urlopen(url, timeout=_TIMEOUT_S) as resp:  # noqa: S310 - fixed https QRZ host
+    """Fetch ``url`` over HTTPS, verifying against certifi's CA bundle so it works
+    in a packaged build that lacks the OS trust store."""
+    with urlopen(url, timeout=_TIMEOUT_S, context=ssl_context()) as resp:  # noqa: S310 - fixed https QRZ host
         charset = resp.headers.get_content_charset() or "utf-8"
         return resp.read().decode(charset)
 
