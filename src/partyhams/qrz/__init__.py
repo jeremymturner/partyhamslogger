@@ -28,6 +28,8 @@ and error handling are exercised by the unit tests (via an injected ``fetch``).
 
 from __future__ import annotations
 
+import socket
+import ssl
 import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
@@ -47,6 +49,28 @@ def _default_fetch(url: str) -> str:
     with urlopen(url, timeout=_TIMEOUT_S) as resp:  # noqa: S310 - fixed https QRZ host
         charset = resp.headers.get_content_charset() or "utf-8"
         return resp.read().decode(charset)
+
+
+def _classify_network_error(exc: BaseException) -> str:
+    """Map a transport exception to a short, specific reason phrase.
+
+    ``urlopen`` wraps the underlying failure: a TLS problem arrives as a
+    ``URLError`` whose ``.reason`` is the ``ssl`` exception, while a timeout
+    can surface either directly or wrapped. We inspect both the exception and
+    its ``.reason`` so the four common failure modes are told apart instead of
+    all collapsing to the unhelpful "network".
+    """
+    reason = getattr(exc, "reason", None)
+    candidates = (exc, reason) if reason is not None else (exc,)
+    for err in candidates:
+        # SSLCertVerificationError is a subclass of SSLError — check it first.
+        if isinstance(err, ssl.SSLCertVerificationError):
+            return "TLS certificate not trusted"
+        if isinstance(err, ssl.SSLError):
+            return "TLS error"
+        if isinstance(err, (socket.timeout, TimeoutError)):
+            return "timed out"
+    return "network"
 
 
 def login_url(username: str, password: str) -> str:
@@ -171,8 +195,8 @@ class QrzClient:
         fetch = fetch or _default_fetch
         try:
             body = fetch(login_url(self.username, self.password))
-        except (URLError, OSError):
-            self.last_error = "QRZ login failed (network)"
+        except (URLError, OSError) as exc:
+            self.last_error = f"QRZ login failed ({_classify_network_error(exc)})"
             return None
         except Exception:  # noqa: BLE001 - any injected/transport error degrades
             self.last_error = "QRZ login failed"
@@ -185,6 +209,75 @@ class QrzClient:
         self.last_error = None
         self.key = key
         return key
+
+    def verify(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        *,
+        call: str = "W1AW",
+        fetch: Fetch | None = None,
+    ) -> tuple[bool, str]:
+        """Test credentials end-to-end: log in, then look up ``call``.
+
+        Returns ``(ok, message)`` where ``message`` is a verbose, human-readable
+        report suitable for showing in the QRZ login dialog. Distinguishes
+        missing credentials, transport failures (TLS certificate / TLS / timeout
+        / network), rejected credentials, and a successful round-trip. Does not
+        raise — every failure mode is reported through the message.
+        """
+        if username is not None:
+            self.username = username
+        if password is not None:
+            self.password = password
+        if not self.username or not self.password:
+            return False, "Enter both a QRZ username and password to test."
+
+        self.key = None  # force a fresh login rather than trusting a cached key
+        if self.login(fetch=fetch) is None:
+            err = self.last_error or "QRZ login failed"
+            if "rejected" in err:
+                return False, (
+                    "Login rejected: QRZ did not accept this username/password. "
+                    "Re-check both (the password is case-sensitive) and confirm "
+                    "your QRZ XML subscription is active."
+                )
+            if "TLS certificate" in err:
+                return False, (
+                    "Could not connect securely: the TLS certificate for "
+                    "xmldata.qrz.com was not trusted. The app is likely missing "
+                    "trusted root certificates. On macOS, run the Python "
+                    '"Install Certificates.command"; otherwise this needs a CA '
+                    "bundle shipped with the build."
+                )
+            if "TLS" in err:
+                return False, (
+                    "A TLS/SSL error occurred connecting to xmldata.qrz.com. "
+                    "A proxy or firewall may be intercepting HTTPS traffic."
+                )
+            if "timed out" in err:
+                return False, (
+                    "Timed out reaching xmldata.qrz.com. The QRZ site may be "
+                    "unavailable, or a firewall/proxy is blocking outbound HTTPS."
+                )
+            if "network" in err:
+                return False, (
+                    "Could not reach xmldata.qrz.com. Check your internet "
+                    "connection and DNS, and that outbound HTTPS (port 443) is "
+                    "allowed."
+                )
+            return False, err
+
+        record = self.lookup(call, fetch=fetch)
+        if record is not None:
+            return True, f"Success — logged in and looked up {format_record(record)}"
+        # Login worked but the test lookup didn't return data (rare).
+        detail = self.last_error or f"no data for {call}"
+        return True, (
+            f"Login succeeded, but the test lookup of {call} returned no data "
+            f"({detail}). Your credentials look OK — lookups should work for "
+            "valid callsigns."
+        )
 
     def lookup(self, call: str, *, fetch: Fetch | None = None) -> dict | None:
         """Look up ``call``, returning a normalized record or ``None``.
@@ -211,8 +304,8 @@ class QrzClient:
         assert self.key is not None
         try:
             body = fetch(lookup_url(self.key, call))
-        except (URLError, OSError):
-            self.last_error = "QRZ lookup failed (network)"
+        except (URLError, OSError) as exc:
+            self.last_error = f"QRZ lookup failed ({_classify_network_error(exc)})"
             return None
         except Exception:  # noqa: BLE001 - any injected/transport error degrades
             self.last_error = "QRZ lookup failed"

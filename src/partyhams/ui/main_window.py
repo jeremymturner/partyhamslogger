@@ -2240,8 +2240,24 @@ class MainWindow(QMainWindow):
 
         dialog = QrzDialog(self._qrz.username, self._qrz.password, parent=self)
         self._qrz_dialog = dialog  # keep alive while open
+        dialog.on_test = lambda username, password: self._qrz_test(dialog, username, password)
         dialog.finished.connect(lambda result: self._qrz_done(dialog, result))
         dialog.open()
+
+    def _qrz_test(self, dialog, username: str, password: str) -> None:
+        """Run a background login + W1AW lookup to verify the entered creds."""
+        if self._loop is None or not self._loop.is_running():
+            dialog.show_test_result(False, "Cannot test now (no event loop running).")
+            return
+        self._loop.create_task(self._do_qrz_test(dialog, username, password))
+
+    async def _do_qrz_test(self, dialog, username: str, password: str) -> None:
+        """Verify QRZ credentials off the UI thread, then report into the dialog."""
+        probe = QrzClient(username, password)
+        ok, message = await asyncio.get_event_loop().run_in_executor(None, probe.verify)
+        if self._qrz_dialog is not dialog:
+            return  # dialog was closed before the test returned
+        dialog.show_test_result(ok, message)
 
     def _qrz_done(self, dialog, result: int) -> None:
         self._qrz_dialog = None

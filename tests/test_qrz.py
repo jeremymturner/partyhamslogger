@@ -7,6 +7,9 @@ parsing, session caching, and the error/expiry paths are all exercised offline.
 
 from __future__ import annotations
 
+import ssl
+from urllib.error import URLError
+
 from partyhams.app.state import AppState, load_state, save_state
 from partyhams.qrz import (
     QrzClient,
@@ -166,6 +169,95 @@ def test_client_login_network_error_returns_none():
 
     assert client.login(fetch=boom) is None
     assert client.key is None
+
+
+# --------------------------------------------------------------------------- #
+# QrzClient.login — transport error classification
+# --------------------------------------------------------------------------- #
+def _raiser(exc: BaseException):
+    def fetch(url):
+        raise exc
+
+    return fetch
+
+
+def test_login_classifies_tls_certificate_error():
+    client = QrzClient("w1aw", "pw")
+    cert_err = ssl.SSLCertVerificationError("unable to get local issuer certificate")
+    assert client.login(fetch=_raiser(URLError(cert_err))) is None
+    assert "TLS certificate not trusted" in client.last_error
+
+
+def test_login_classifies_generic_tls_error():
+    client = QrzClient("w1aw", "pw")
+    assert client.login(fetch=_raiser(URLError(ssl.SSLError("handshake")))) is None
+    assert "TLS error" in client.last_error
+
+
+def test_login_classifies_timeout():
+    client = QrzClient("w1aw", "pw")
+    assert client.login(fetch=_raiser(TimeoutError("timed out"))) is None
+    assert "timed out" in client.last_error
+
+
+def test_login_plain_oserror_is_network():
+    client = QrzClient("w1aw", "pw")
+    assert client.login(fetch=_raiser(OSError("no route to host"))) is None
+    assert "(network)" in client.last_error
+
+
+# --------------------------------------------------------------------------- #
+# QrzClient.verify — verbose credential self-test
+# --------------------------------------------------------------------------- #
+def test_verify_success_reports_lookup():
+    client = QrzClient()
+
+    def fetch(url):
+        return _LOGIN_OK if "username=" in url else _LOOKUP_OK
+
+    ok, message = client.verify("w1aw", "pw", fetch=fetch)
+    assert ok is True
+    assert "Success" in message
+    assert "W1AW" in message
+
+
+def test_verify_missing_credentials():
+    ok, message = QrzClient().verify("", "", fetch=lambda url: _LOGIN_OK)
+    assert ok is False
+    assert "username and password" in message.lower()
+
+
+def test_verify_rejected_credentials_is_verbose():
+    ok, message = QrzClient().verify("w1aw", "wrong", fetch=lambda url: _LOGIN_BAD)
+    assert ok is False
+    assert "rejected" in message.lower()
+
+
+def test_verify_tls_certificate_is_verbose():
+    client = QrzClient("w1aw", "pw")
+    cert_err = ssl.SSLCertVerificationError("unable to get local issuer certificate")
+    ok, message = client.verify(fetch=_raiser(URLError(cert_err)))
+    assert ok is False
+    assert "certificate" in message.lower()
+
+
+def test_verify_timeout_is_verbose():
+    client = QrzClient("w1aw", "pw")
+    ok, message = client.verify(fetch=_raiser(TimeoutError()))
+    assert ok is False
+    assert "timed out" in message.lower()
+
+
+def test_verify_login_ok_but_lookup_empty():
+    client = QrzClient()
+    seq = iter([_LOGIN_OK, _LOOKUP_NOTFOUND])
+
+    def fetch(url):
+        return next(seq)
+
+    ok, message = client.verify("w1aw", "pw", fetch=fetch)
+    assert ok is True  # credentials are valid even though the lookup returned nothing
+    assert "Login succeeded" in message
 
 
 # --------------------------------------------------------------------------- #
