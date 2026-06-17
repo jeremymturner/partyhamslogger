@@ -28,6 +28,8 @@ and error handling are exercised by the unit tests (via an injected ``fetch``).
 
 from __future__ import annotations
 
+import socket
+import ssl
 import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
@@ -47,6 +49,25 @@ def _default_fetch(url: str) -> str:
     with urlopen(url, timeout=_TIMEOUT_S) as resp:  # noqa: S310 - fixed https QRZ host
         charset = resp.headers.get_content_charset() or "utf-8"
         return resp.read().decode(charset)
+
+
+def _transport_error_detail(err: BaseException) -> str:
+    """Classify a fetch failure into a short, actionable reason for the status bar.
+
+    ``urlopen`` wraps the underlying cause in ``URLError.reason``, so we inspect
+    both the raised error and that reason. A failed TLS handshake (commonly an
+    untrusted CA bundle in a packaged/freshly-installed app) is the usual cause
+    of a "login fails despite correct credentials" report, so it gets its own
+    message instead of being lumped under the generic "network".
+    """
+    candidates = [err, getattr(err, "reason", None)]
+    if any(isinstance(c, ssl.SSLCertVerificationError) for c in candidates):
+        return "TLS certificate not trusted"
+    if any(isinstance(c, ssl.SSLError) for c in candidates):
+        return "TLS error"
+    if any(isinstance(c, (TimeoutError, socket.timeout)) for c in candidates):
+        return "timed out"
+    return "network"
 
 
 def login_url(username: str, password: str) -> str:
@@ -171,8 +192,8 @@ class QrzClient:
         fetch = fetch or _default_fetch
         try:
             body = fetch(login_url(self.username, self.password))
-        except (URLError, OSError):
-            self.last_error = "QRZ login failed (network)"
+        except (URLError, OSError) as err:
+            self.last_error = f"QRZ login failed ({_transport_error_detail(err)})"
             return None
         except Exception:  # noqa: BLE001 - any injected/transport error degrades
             self.last_error = "QRZ login failed"
@@ -211,8 +232,8 @@ class QrzClient:
         assert self.key is not None
         try:
             body = fetch(lookup_url(self.key, call))
-        except (URLError, OSError):
-            self.last_error = "QRZ lookup failed (network)"
+        except (URLError, OSError) as err:
+            self.last_error = f"QRZ lookup failed ({_transport_error_detail(err)})"
             return None
         except Exception:  # noqa: BLE001 - any injected/transport error degrades
             self.last_error = "QRZ lookup failed"

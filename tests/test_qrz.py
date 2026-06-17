@@ -166,6 +166,31 @@ def test_client_login_network_error_returns_none():
 
     assert client.login(fetch=boom) is None
     assert client.key is None
+    assert "(network)" in client.last_error
+
+
+def test_client_login_tls_cert_error_is_distinct():
+    """A failed TLS handshake (untrusted CA) must not look like a plain outage."""
+    import ssl
+    from urllib.error import URLError
+
+    client = QrzClient("w1aw", "pw")
+
+    def boom(url):
+        raise URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+
+    assert client.login(fetch=boom) is None
+    assert "TLS certificate not trusted" in client.last_error
+
+
+def test_client_login_timeout_is_distinct():
+    client = QrzClient("w1aw", "pw")
+
+    def boom(url):
+        raise TimeoutError("timed out")
+
+    assert client.login(fetch=boom) is None
+    assert "timed out" in client.last_error
 
 
 # --------------------------------------------------------------------------- #
