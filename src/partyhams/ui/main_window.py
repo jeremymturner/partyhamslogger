@@ -1635,11 +1635,30 @@ class MainWindow(QMainWindow):
 
     def _import_call_history(self) -> None:
         text = self._pick_refdata_file("Import Call History")
-        if text is not None:
-            fields = [f.name for f in self.session.contest.exchange_fields()]
-            count = self._refdata.import_call_history(text, fields)
-            self.statusBar().showMessage(f"Loaded {count} call-history entries", 4000)
-            self._autofill_from_history()  # apply to the call already in the box
+        if text is None:
+            return
+        fields = [f.name for f in self.session.contest.exchange_fields()]
+        count = self._refdata.import_call_history(text, fields)
+        if count == 0:
+            # 0 entries almost always means the file's column names didn't match
+            # this contest's exchange — say so rather than a silent "Loaded 0".
+            self.statusBar().showMessage(
+                "Call history: no entries matched — check the file's column names "
+                f"against this contest's exchange ({', '.join(fields)})",
+                8000,
+            )
+            return
+        # Report which exchange fields actually got data, so a partial match
+        # (e.g. only Section because the Class column was unrecognized) is visible.
+        filled = [f for f in fields if any(f in rec for rec in self._refdata.history.values())]
+        msg = f"Loaded {count} call-history entries"
+        if filled:
+            msg += f" · filled {', '.join(filled)}"
+        missing = [f for f in fields if f not in filled]
+        if missing:
+            msg += f" (no data for {', '.join(missing)})"
+        self.statusBar().showMessage(msg, 8000)
+        self._autofill_from_history()  # apply to the call already in the box
 
     def _import_lotw(self) -> None:
         text = self._pick_refdata_file("Import LoTW users")

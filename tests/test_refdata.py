@@ -20,6 +20,19 @@ n0call,Carol,WWA,WA,1D
 not-a-call,Dave,EMA,MA,9Z
 """
 
+# A real N1MM Field Day call-history file: the class column is named "Exch1"
+# (not "Class"), and a #-comment block sits between the header and the data.
+FD_N1MM_HISTORY = """\
+!!Order!!,Call,Exch1,Sect,UserText
+# FD
+# LastEdit,2026-06-16
+# Original file from Mike W1MI
+
+AA0B,1A,MO,Central MO Radio Assn.
+AA0EL,2A,CO,(K0IIT GOTA) Montrose ARC
+AA0IZ,1D,OR
+"""
+
 # Simple CSV: a plain header row (first column Call), no !!Order!! marker.
 CSV_HISTORY = """\
 Call,Class,Section
@@ -107,6 +120,15 @@ def test_parse_call_history_n1mm_format():
     assert hist["W7XYZ"] == {"section": "OR", "class": "3A"}
     assert hist["N0CALL"]["section"] == "WWA"  # call uppercased
     assert "NOT-A-CALL" not in hist  # junk callsign rejected
+
+
+def test_parse_call_history_n1mm_exch1_maps_to_class():
+    # The standard N1MM FD file names the class column "Exch1"; it must map to
+    # our "class" field, and rows with no UserText must still parse (issue #19).
+    hist = parse_call_history(FD_N1MM_HISTORY, FD_FIELDS)
+    assert hist["AA0B"] == {"class": "1A", "section": "MO"}
+    assert hist["AA0EL"] == {"class": "2A", "section": "CO"}
+    assert hist["AA0IZ"] == {"class": "1D", "section": "OR"}
 
 
 def test_parse_call_history_simple_csv():

@@ -16,7 +16,10 @@ from collections.abc import Iterable
 _CALL_RE = re.compile(r"^(?=[A-Z0-9/]*[0-9])[A-Z0-9]+(?:/[A-Z0-9]+)*$")
 
 #: Common N1MM call-history column names mapped to our exchange field keys.
-_HISTORY_ALIASES = {"sect": "section"}
+#: N1MM names the Field Day class column ``Exch1`` (not ``Class``), so bridge it.
+#: An alias only takes effect if the active contest actually has that field, so
+#: this is harmless for contests without a ``class``/``section`` exchange.
+_HISTORY_ALIASES = {"sect": "section", "exch1": "class"}
 
 
 def _clean_lines(text: str) -> list[str]:
@@ -106,7 +109,8 @@ def parse_call_history(
 
     Column names are matched case-insensitively against ``fields`` (the active
     contest's exchange field names, e.g. ``{"class", "section"}``), with
-    ``aliases`` (default ``sect→section``) bridging common N1MM names. Columns
+    ``aliases`` (defaults ``sect→section`` and ``exch1→class``) bridging common
+    N1MM names. Columns
     that don't map to an exchange field are ignored. Calls are uppercased and
     entries carrying no recognized exchange values are dropped — so importing a
     file for the wrong contest simply yields nothing rather than bad data.
