@@ -70,12 +70,21 @@ jobs:
             Lint with `python -m ruff check src tests`.
           claude_args: --max-turns 50 --model claude-opus-4-8 --allowedTools Bash,Edit,Write,Read,Glob,Grep,WebFetch,TodoWrite
 
-  # Respond to "@claude …" mentions in issue/PR comments and PR reviews.
+  # Respond to "@claude …" mentions in issue/PR comments and PR reviews — but only
+  # from users with write access (OWNER/MEMBER/COLLABORATOR). The action enforces
+  # this too, so without the gate a non-collaborator's @claude produces a *failed*
+  # run; gating here makes it skip cleanly instead.
   mention:
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
+      (github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' &&
+        contains(github.event.review.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
