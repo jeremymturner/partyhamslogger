@@ -20,6 +20,7 @@ dependencies = [
     "PySide6>=6.7",
     "qasync>=0.27",       # asyncio <-> Qt event loop bridge
     "pyserial>=3.5",      # Icom CI-V / serial CAT
+    "certifi>=2024.2",    # CA bundle for HTTPS in packaged builds (no OS trust store)
 ]
 
 [project.optional-dependencies]

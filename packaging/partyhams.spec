@@ -12,7 +12,7 @@
 import os
 import sys
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))  # noqa: F821 (SPECPATH injected)
 SRC = os.path.join(ROOT, "src")
@@ -42,10 +42,14 @@ for _sub in ("guide", "screenshots"):
 _wsjtx = os.path.join(ROOT, "docs", "WSJTX.md")
 if os.path.isfile(_wsjtx):
     datas.append((_wsjtx, "docs"))
+# Bundle certifi's CA bundle so HTTPS (QRZ, update check, POTA) verifies in the
+# packaged app, which has no OS trust store. certifi.where() resolves to this at
+# runtime — see partyhams/core/certs.py.
+datas += collect_data_files("certifi")
 hiddenimports = (
     collect_submodules("partyhams.radio")
     + collect_submodules("partyhams.contest")
-    + ["PySide6.QtMultimedia"]  # imported lazily for voice macros
+    + ["PySide6.QtMultimedia", "certifi"]  # QtMultimedia: voice macros; certifi: HTTPS CA bundle
 )
 
 a = Analysis(

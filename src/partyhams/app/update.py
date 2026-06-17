@@ -23,6 +23,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from partyhams.core.certs import ssl_context
+
 #: Where to look for releases. ``owner/name``.
 GITHUB_REPO = "jeremymturner/partyhamslogger"
 
@@ -105,7 +107,7 @@ def asset_for_platform(
 
 def _http_get_json(url: str, headers: dict[str, str]) -> dict:
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 (trusted GitHub URL)
+    with urllib.request.urlopen(req, timeout=15, context=ssl_context()) as resp:  # noqa: S310
         return json.loads(resp.read().decode())
 
 
@@ -148,7 +150,7 @@ def is_asset_url(url: str) -> bool:
 
 def _urlopen(url: str):  # noqa: ANN202 - returns an http.client.HTTPResponse
     req = urllib.request.Request(url, headers={"User-Agent": "partyhams-update-check"})
-    return urllib.request.urlopen(req, timeout=30)  # noqa: S310 (trusted GitHub URL)
+    return urllib.request.urlopen(req, timeout=30, context=ssl_context())  # noqa: S310
 
 
 def download_asset(
