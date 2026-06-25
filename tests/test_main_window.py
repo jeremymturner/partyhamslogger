@@ -905,3 +905,284 @@ def test_default_adif_path_without_park_omits_park_segment():
     assert name.startswith("W7ABC_")
     assert "@" not in name  # no park -> no @ segment
     assert name.endswith(".adif")
+
+
+# --- new-log dialog: no nonsensical "My Their park" field ------------------ #
+def test_log_dialog_excludes_received_only_exchange_fields_for_pota():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.log_dialog import LogDialog
+
+    QApplication.instance() or QApplication([])
+    dlg = LogDialog()
+    idx = dlg._contest.findData("pota")
+    assert idx >= 0
+    dlg._contest.setCurrentIndex(idx)  # triggers _rebuild_contest_fields
+
+    # The received-only P2P park must NOT be collected as a sent-exchange field
+    # (that produced the bogus "My Their park" row); the activator's own park is
+    # the dedicated multi-park widget, not an exchange/plain-config field.
+    assert "park" not in dlg._exchange_edits
+    assert dlg._park_list is not None
+    assert dlg.settings()["sent_exchange"] == {}  # POTA sends only RST
+
+
+def test_log_dialog_multi_park_collected_comma_separated():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.log_dialog import LogDialog
+
+    QApplication.instance() or QApplication([])
+    dlg = LogDialog()
+    dlg._contest.setCurrentIndex(dlg._contest.findData("pota"))
+
+    # Add two parks independently; a bad ref is rejected.
+    dlg._park_edit.setText("US-1234")
+    dlg._add_park_ref()
+    dlg._park_edit.setText("not-a-park")
+    dlg._add_park_ref()  # ignored — invalid
+    dlg._park_edit.setText("US-5678")
+    dlg._add_park_ref()
+    assert dlg._park_list.count() == 2
+    assert dlg.settings()["extra"]["park"] == "US-1234,US-5678"
+
+    # A valid ref typed but not yet "Add"-ed is still included on accept.
+    dlg._park_edit.setText("CA-0001")
+    assert dlg.settings()["extra"]["park"] == "US-1234,US-5678,CA-0001"
+
+    # Removing a selected park drops it from the list.
+    dlg._park_list.setCurrentRow(0)
+    dlg._remove_park_ref()
+    dlg._park_edit.clear()
+    assert dlg.settings()["extra"]["park"] == "US-5678"
+
+
+def test_log_dialog_keeps_sent_exchange_fields_for_field_day():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.log_dialog import LogDialog
+
+    QApplication.instance() or QApplication([])
+    dlg = LogDialog()
+    idx = dlg._contest.findData("arrl-field-day")
+    assert idx >= 0
+    dlg._contest.setCurrentIndex(idx)
+    # Field Day's class/section are symmetric -> still collected as sent exchange.
+    assert set(dlg._exchange_edits) == {"class", "section"}
+
+
+_FAKE_PARKS = {
+    "US-1234": {"reference": "US-1234", "name": "A", "entity": "United States Of America",
+                "location": "US-WA", "locations": ["US-WA"]},
+    "US-5678": {"reference": "US-5678", "name": "B", "entity": "United States Of America",
+                "location": "US-WA", "locations": ["US-WA"]},
+    # US-4403 spans multiple locations.
+    "US-4403": {"reference": "US-4403", "name": "C", "entity": "United States Of America",
+                "location": "US-TN,US-NC", "locations": ["US-TN", "US-NC"]},
+}
+
+
+def _pota_dialog_with_fake_lookup():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.log_dialog import LogDialog
+
+    QApplication.instance() or QApplication([])
+    dlg = LogDialog()
+    dlg._contest.setCurrentIndex(dlg._contest.findData("pota"))
+    dlg._verify_fn = lambda ref: _FAKE_PARKS.get(ref)
+    return dlg
+
+
+def test_verify_all_parks_fills_entity_and_single_location():
+    dlg = _pota_dialog_with_fake_lookup()
+    for ref in ("US-1234", "US-5678"):
+        dlg._park_edit.setText(ref)
+        dlg._add_park_ref()
+
+    dlg._verify_all_parks()  # verifies the whole list, not just one
+    assert dlg._entity_edit.text() == "United States Of America"
+    # Both parks resolve to the same single location -> auto-selected.
+    assert dlg._location_combo.currentText() == "US-WA"
+    extra = dlg.settings()["extra"]
+    assert extra["entity"] == "United States Of America"
+    assert extra["location"] == "US-WA"
+
+
+def test_edit_log_dialog_us_4403_location_dropdown():
+    """Editing a log whose park (US-4403) spans two states must offer a dropdown
+    letting the operator pick either US-CO or US-WY."""
+    from PySide6.QtWidgets import QApplication, QDialog
+
+    from partyhams.ui.log_dialog import LogDialog
+
+    QApplication.instance() or QApplication([])
+    existing = {
+        "contest_id": "pota",
+        "my_call": "W7ABC",
+        "operator": "W7ABC",
+        "network": "",
+        "sent_exchange": {},
+        "extra": {"park": "US-4403"},
+    }
+    dlg = LogDialog(existing=existing)  # EDIT mode
+    dlg._verify_fn = lambda ref: {
+        "US-4403": {
+            "entity": "United States Of America",
+            "location": "US-CO,US-WY",
+            "locations": ["US-CO", "US-WY"],
+        }
+    }.get(ref)
+    # The park is pre-loaded from the log; Verify resolves its locations.
+    assert [dlg._park_list.item(i).text() for i in range(dlg._park_list.count())] == ["US-4403"]
+    dlg._verify_all_parks()
+
+    options = [dlg._location_combo.itemText(i) for i in range(dlg._location_combo.count())]
+    assert options == ["US-CO", "US-WY"]  # both states offered
+    assert dlg._location_combo.currentText().strip() == ""  # nothing auto-picked
+
+    # Can't accept until a location is chosen.
+    dlg._on_accept()
+    assert dlg.result() != QDialog.DialogCode.Accepted
+
+    # Either choice is selectable and round-trips through settings().
+    dlg._location_combo.setCurrentText("US-CO")
+    assert dlg.settings()["extra"]["location"] == "US-CO"
+    dlg._location_combo.setCurrentText("US-WY")
+    assert dlg.settings()["extra"]["location"] == "US-WY"
+    dlg._on_accept()
+    assert dlg.result() == QDialog.DialogCode.Accepted
+
+
+def test_verify_multi_location_park_requires_selection_to_continue():
+    from PySide6.QtWidgets import QDialog
+
+    dlg = _pota_dialog_with_fake_lookup()
+    dlg._call.setText("W7ABC")
+    dlg._park_edit.setText("US-4403")
+    dlg._add_park_ref()
+    dlg._verify_all_parks()
+
+    items = [dlg._location_combo.itemText(i) for i in range(dlg._location_combo.count())]
+    assert items == ["US-TN", "US-NC"]
+    assert dlg._location_combo.currentText().strip() == ""  # nothing auto-picked
+
+    # OK is blocked while the location is ambiguous and unselected.
+    dlg._on_accept()
+    assert dlg.result() != QDialog.DialogCode.Accepted
+
+    # Once a location is chosen, OK goes through.
+    dlg._location_combo.setCurrentText("US-NC")
+    dlg._on_accept()
+    assert dlg.result() == QDialog.DialogCode.Accepted
+    assert dlg.settings()["extra"]["location"] == "US-NC"
+
+
+def test_log_dialog_edit_mode_prefills_and_locks():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.log_dialog import LogDialog
+
+    QApplication.instance() or QApplication([])
+    existing = {
+        "contest_id": "pota",
+        "my_call": "W7ABC",
+        "operator": "N0AW",
+        "network": "fd-net",
+        "sent_exchange": {},
+        "extra": {
+            "park": "US-1234,US-5678",
+            "entity": "United States Of America",
+            "location": "US-WA",
+        },
+    }
+    dlg = LogDialog(existing=existing)
+
+    # Fixed fields are pre-filled and locked.
+    assert dlg._call.text() == "W7ABC"
+    assert dlg._operator.text() == "N0AW"
+    assert dlg._network.text() == "fd-net"
+    assert not dlg._contest.isEnabled()  # contest type fixed once a log exists
+    assert not dlg._network.isEnabled()  # sync network fixed at creation
+
+    # POTA fields pre-filled.
+    parks = [dlg._park_list.item(i).text() for i in range(dlg._park_list.count())]
+    assert parks == ["US-1234", "US-5678"]
+    assert dlg._entity_edit.text() == "United States Of America"
+    assert dlg._location_combo.currentText() == "US-WA"
+
+    # settings() round-trips the (locked) contest and edited values.
+    s = dlg.settings()
+    assert s["contest_id"] == "pota"
+    assert s["extra"]["park"] == "US-1234,US-5678"
+    assert s["extra"]["entity"] == "United States Of America"
+    assert s["extra"]["location"] == "US-WA"
+
+
+# --- station line (top): Station/Operator + POTA park context -------------- #
+def _pota_window(extra):
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    s = build_session(
+        contest_id="pota", my_call="W7ABC", operator="W7ABC",
+        sent_exchange={}, extra=extra, network=None, db_path=":memory:",
+    )
+    w = MainWindow(s)
+    w.refresh()
+    return w
+
+
+def test_station_line_merges_station_operator_when_same():
+    w = _pota_window({"park": "US-4403"})
+    text = w._station_label.text()
+    assert "Station/Operator" in text  # one field when call == operator
+    assert "W7ABC" in text
+
+
+def test_station_line_splits_station_and_operator_when_different():
+    w = _pota_window({"park": "US-4403"})
+    w.session.set_operator("N0AW")
+    w.refresh()
+    text = w._station_label.text()
+    assert "Station" in text and "Op" in text
+    assert "Station/Operator" not in text
+    assert "N0AW" in text
+
+
+def test_station_line_single_park_shows_id_name_location():
+    w = _pota_window(
+        {"park": "US-4403", "location": "US-WY", "park_names": {"US-4403": "Snowy Range NST"}}
+    )
+    text = w._station_label.text()
+    assert "US-4403" in text
+    assert "Snowy Range NST" in text
+    assert "US-WY" in text
+    assert "fer" not in text  # single park -> not an N-fer
+    assert "QSOs" in text  # QSO count consolidated onto the single top line
+
+
+def test_station_line_multi_park_shows_n_fer_in_location():
+    w = _pota_window({"park": "US-1234,US-5678,US-4403", "location": "US-WY"})
+    text = w._station_label.text()
+    assert "3-fer" in text
+    assert "in US-WY" in text
+
+
+def test_station_line_non_pota_has_no_park_segment():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    s = build_session(
+        contest_id="arrl-field-day", my_call="W7ABC",
+        sent_exchange={"class": "1E", "section": "OR"}, network=None, db_path=":memory:",
+    )
+    w = MainWindow(s)
+    w.refresh()
+    text = w._station_label.text()
+    assert "W7ABC" in text
+    assert "fer" not in text and "US-" not in text

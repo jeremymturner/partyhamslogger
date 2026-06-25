@@ -213,6 +213,21 @@ def run() -> int:
     quit_filter = _GracefulQuitFilter(_graceful_quit)
     app.installEventFilter(quit_filter)
 
+    # Quit cleanly on Ctrl-C / kill from a terminal. Without this, SIGINT raises
+    # KeyboardInterrupt inside a Qt virtual override (e.g. eventFilter), where Qt
+    # swallows it — so the app keeps running and spams a traceback on every ^C.
+    # Routing the signal through the asyncio loop runs the same graceful teardown
+    # as ⌘Q / closing the window. Falls back to immediate exit where the loop
+    # can't install signal handlers (e.g. Windows); state is persisted on change.
+    import signal
+
+    for _sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(_sig, _graceful_quit)
+        except (NotImplementedError, RuntimeError, ValueError):
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            break
+
     async def amain() -> None:
         while ctx["session"] is not None:
             active = ctx["session"]

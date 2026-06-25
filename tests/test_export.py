@@ -63,6 +63,49 @@ async def test_adif_structure():
     assert "<CONTEST_ID:7>ARRL-FD" in adif
 
 
+async def test_adif_my_pota_ref_multi_park():
+    """A POTA log's activator parks export as a comma-separated MY_POTA_REF."""
+    s = build_session(
+        contest_id="pota",
+        my_call="W7ABC",
+        sent_exchange={},
+        extra={"park": "US-1234,US-5678"},
+        network=None,
+    )
+    await s.log_qso(call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={})
+    adif = s.export_adif()
+    assert "<MY_POTA_REF:15>US-1234,US-5678" in adif
+
+
+async def test_adif_my_entity_and_state():
+    """The operating site's DX entity + location export as MY_COUNTRY / MY_STATE."""
+    s = build_session(
+        contest_id="pota",
+        my_call="W7ABC",
+        sent_exchange={},
+        extra={"park": "US-1234", "entity": "United States Of America", "location": "US-WA"},
+        network=None,
+    )
+    await s.log_qso(call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={})
+    adif = s.export_adif()
+    assert "<MY_COUNTRY:24>United States Of America" in adif
+    assert "<MY_STATE:2>WA" in adif  # state derived from the "US-WA" location code
+
+
+async def test_adif_no_my_pota_ref_without_park():
+    """Non-POTA logs (no park) don't emit MY_POTA_REF."""
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W7ABC",
+        sent_exchange={"class": "1E", "section": "OR"},
+        network=None,
+    )
+    await s.log_qso(
+        call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    assert "MY_POTA_REF" not in s.export_adif()
+
+
 async def test_adif_ft8_ft4_mode_and_submode():
     """FT8 is a top-level ADIF MODE; FT4 is a SUBMODE of MFSK."""
     s = build_session(

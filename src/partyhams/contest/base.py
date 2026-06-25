@@ -24,6 +24,12 @@ class ExchangeField:
     required: bool = True
     # Optional validator; returns True if the raw string is acceptable.
     validator: Callable[[str], bool] | None = None
+    # Whether this field is also part of *our* sent exchange — i.e. a fixed value
+    # the station sends every QSO, collected once on the log-setup screen. True for
+    # symmetric exchanges (Field Day class/section). False for received-only,
+    # per-QSO fields like a park-to-park reference, which would otherwise show up
+    # nonsensically as "My Their park" in the new-log dialog.
+    sent: bool = True
 
 
 @dataclass(frozen=True)

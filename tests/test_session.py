@@ -164,6 +164,49 @@ async def test_set_operator_stamps_new_qsos_and_persists(tmp_path):
     assert open_session(db).operator == "W1XYZ"
 
 
+async def test_update_config_edits_persists_and_stamps_new_qsos(tmp_path):
+    from partyhams.app.session import build_session, open_session
+
+    db = tmp_path / "log.sqlite"
+    s = build_session(
+        contest_id="pota",
+        my_call="W7ABC",
+        operator="W7ABC",
+        sent_exchange={},
+        extra={"park": "US-1"},
+        network=None,
+        db_path=db,
+    )
+    q1 = await s.log_qso(call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={})
+    assert q1.station_callsign == "W7ABC"
+
+    s.update_config(
+        my_call="w7xyz",
+        operator="n0aw",
+        sent_exchange={},
+        extra={"park": "US-1,US-2", "entity": "United States Of America", "location": "US-WA"},
+    )
+    assert s.config.my_call == "W7XYZ"
+    assert s.engine.call == "W7XYZ"
+    assert s.engine.operator == "N0AW"
+    assert s.config.extra["park"] == "US-1,US-2"
+    assert s.config.extra["location"] == "US-WA"
+    assert "power" in s.config.extra  # creation-time defaults preserved by the merge
+
+    # New QSOs follow the edited station call + operator; old ones are unchanged.
+    q2 = await s.log_qso(call="W2ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={})
+    assert q2.station_callsign == "W7XYZ"
+    assert q2.operator == "N0AW"
+
+    # Persisted to the log: a reopen restores the edits.
+    s.store.close()
+    s2 = open_session(db)
+    assert s2.config.my_call == "W7XYZ"
+    assert s2.operator == "N0AW"
+    assert s2.config.extra["park"] == "US-1,US-2"
+    assert s2.config.extra["entity"] == "United States Of America"
+
+
 async def test_station_id_and_stats_persist_across_reopen(tmp_path):
     db = tmp_path / "log.sqlite"
     from partyhams.app.session import build_session, open_session

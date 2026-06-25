@@ -123,6 +123,19 @@ def qso_to_adif(qso: QSO, config: ContestConfig) -> str:
         parts.append(_field("RST_SENT", qso.rst_sent))
     if qso.rst_rcvd:
         parts.append(_field("RST_RCVD", qso.rst_rcvd))
+    # Activator's own park(s) for a POTA activation — comma-separated for an n-fer
+    # (overlapping parks). Stored in config.extra["park"]; emitted as MY_POTA_REF.
+    my_park = str(config.extra.get("park", "") or "").strip()
+    if my_park:
+        parts.append(_field("MY_POTA_REF", my_park))
+    # Operating site (POTA): DX entity -> MY_COUNTRY, location code -> MY_STATE
+    # (the part after the dash of a single "XX-YY" code, e.g. US-WA -> WA).
+    my_entity = str(config.extra.get("entity", "") or "").strip()
+    if my_entity:
+        parts.append(_field("MY_COUNTRY", my_entity))
+    my_loc = str(config.extra.get("location", "") or "").strip()
+    if my_loc and "," not in my_loc and "-" in my_loc:
+        parts.append(_field("MY_STATE", my_loc.split("-", 1)[1]))
     sent = _exchange_string(config.sent_exchange)
     rcvd = _exchange_string(qso.exchange_rcvd)
     if sent:

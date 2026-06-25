@@ -44,7 +44,11 @@ def park_url(ref: str) -> str:
 
 
 def verify_park(ref: str, *, fetch: Fetch | None = None) -> dict | None:
-    """Look up a POTA park reference and return ``{ref, name, location}`` or ``None``.
+    """Look up a POTA park and return its details (or ``None`` on any failure).
+
+    Result keys: ``reference``, ``name``, ``location`` (raw locationDesc), ``entity``
+    (DXCC name), ``locations`` (list of location codes — more than one for a park
+    that spans several), and ``grid``.
 
     Returns ``None`` on any failure — empty ref, network error, non-JSON body, or
     a payload missing a park name — so callers can degrade gracefully offline.
@@ -67,14 +71,24 @@ def verify_park(ref: str, *, fetch: Fetch | None = None) -> dict | None:
     name = data.get("name") or data.get("parkName")
     if not name:
         return None
-    location = (
-        data.get("locationDesc")
-        or data.get("location")
-        or data.get("grid")
-        or ""
-    )
+    # The API's ``name`` is the bare park name (e.g. "Medicine Bow - Routt"); the
+    # full name appends the park type ("National Forest") unless it's already there.
+    park_type = str(data.get("parktypeDesc") or "").strip()
+    if park_type and park_type.lower() not in str(name).lower():
+        name = f"{name} {park_type}".strip()
+    # ``locationDesc`` is the authoritative location code, comma-separated when a
+    # park spans more than one (e.g. ``US-TN,US-NC``). Split it so the caller can
+    # offer a choice; ``location`` keeps the raw string for back-compat.
+    location_desc = str(data.get("locationDesc") or "")
+    locations = [p.strip().upper() for p in location_desc.split(",") if p.strip()]
+    location = location_desc or str(data.get("location") or data.get("grid") or "")
     return {
         "reference": data.get("reference", ref),
         "name": str(name),
-        "location": str(location),
+        "location": location,
+        # DX entity (DXCC) name, e.g. "United States Of America".
+        "entity": str(data.get("entityName") or data.get("entity") or ""),
+        # One or more location codes the park sits in; pick one when operating.
+        "locations": locations,
+        "grid": str(data.get("grid6") or data.get("grid4") or data.get("grid") or ""),
     }

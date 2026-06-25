@@ -316,7 +316,7 @@ class MainWindow(QMainWindow):
         self._build_menu()
         root = QWidget()
         layout = QVBoxLayout(root)
-        layout.addWidget(self._build_score_bar())
+        layout.addWidget(self._build_station_bar())
         layout.addWidget(self._build_entry_row())
         layout.addWidget(self._build_log_table(), stretch=1)
         self._fkey_bar = self._build_fkey_bar()
@@ -1294,6 +1294,8 @@ class MainWindow(QMainWindow):
         self._recent_menu = logs_menu.addMenu("Open Recent")
         self._recent_menu.aboutToShow.connect(self._rebuild_recent_menu)
         logs_menu.addSeparator()
+        edit_log = logs_menu.addAction("Edit Log…", self._edit_log)
+        edit_log.setStatusTip("Edit this log's station setup — call, operator, exchange, park")
         set_op = logs_menu.addAction("Set Operator…", self._choose_operator)
         set_op.setShortcut(QKeySequence(sc.SET_OPERATOR))
         set_op.setStatusTip("Set who is at the key — stamps new QSOs and colors the log")
@@ -1389,6 +1391,35 @@ class MainWindow(QMainWindow):
         if self.on_autocq_interval is not None:
             self.on_autocq_interval(self._autocq_interval)  # app persists it
         self.statusBar().showMessage(f"Auto-CQ interval {self._autocq_interval}s", 2000)
+
+    def _edit_log(self) -> None:
+        """Edit this log's station setup (call, operator, sent exchange, and
+        contest fields like the POTA park/entity/location) after creation. The
+        activity type and sync network are fixed at creation and shown locked."""
+        from partyhams.ui.log_dialog import LogDialog
+
+        existing = {
+            "contest_id": self.session.contest.id,
+            "my_call": self.session.config.my_call,
+            "operator": self.session.engine.operator,
+            "network": self.session.store.get_meta("network", "") or "",
+            "sent_exchange": self.session.config.sent_exchange,
+            "extra": self.session.config.extra,
+        }
+        dialog = LogDialog(existing=existing, parent=self)
+        self._log_edit_dialog = dialog  # keep alive while open
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        s = dialog.settings()
+        self.session.update_config(
+            my_call=s["my_call"],
+            operator=s["operator"],
+            sent_exchange=s["sent_exchange"],
+            extra=s["extra"],
+        )
+        self.refresh()
+        self._update_radio_label()
+        self.statusBar().showMessage("Log settings updated", 3000)
 
     def _choose_operator(self) -> None:
         """Prompt for who's now at the key. New QSOs are stamped with this
@@ -1875,11 +1906,60 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # construction
     # ------------------------------------------------------------------ #
-    def _build_score_bar(self) -> QLabel:
-        self._score_label = QLabel()
-        self._score_label.setObjectName("scoreBar")  # themed in ui/style.py
-        self._score_label.setTextFormat(Qt.TextFormat.RichText)
-        return self._score_label
+    def _build_station_bar(self) -> QLabel:
+        self._station_label = QLabel()
+        self._station_label.setObjectName("scoreBar")  # share the score bar's theming
+        self._station_label.setTextFormat(Qt.TextFormat.RichText)
+        return self._station_label
+
+    def _update_station_bar(self) -> None:
+        """The single top line: Station/Operator (merged when the same call), the
+        POTA park context (one park = id + name + location; several = an
+        "N-fer in <location>"), and the running QSO count."""
+        dim = style.TEXT_DIM
+        call = self.session.config.my_call
+        operator = self.session.engine.operator
+        if operator and operator != call:
+            who = (
+                f"<span style='color:{dim}'>Station</span> "
+                f"<b style='color:{style.ACCENT}'>{call}</b> "
+                f"<span style='color:{dim}'>· Op</span> <b>{operator}</b>"
+            )
+        else:
+            who = (
+                f"<span style='color:{dim}'>Station/Operator</span> "
+                f"<b style='color:{style.ACCENT}'>{call}</b>"
+            )
+        parts = [who]
+        pota = self._pota_context()
+        if pota:
+            parts.append(pota)
+        qsos = self.session.score().qso_count
+        parts.append(
+            f"<span style='color:{dim}'>QSOs</span> <b style='color:{style.TEXT}'>{qsos}</b>"
+        )
+        self._station_label.setText(" &nbsp;|&nbsp; ".join(parts))
+
+    def _pota_context(self) -> str:
+        """The POTA park segment for the station line, or '' when not applicable."""
+        if self.session.contest.id != "pota":
+            return ""
+        extra = self.session.config.extra
+        raw = str(extra.get("park", "") or "")
+        parks = [p.strip().upper() for p in raw.split(",") if p.strip()]
+        if not parks:
+            return ""
+        location = str(extra.get("location", "") or "").strip()
+        loc_txt = f" <span style='color:{style.TEXT_DIM}'>·</span> {location}" if location else ""
+        if len(parks) == 1:
+            ref = parks[0]
+            names = extra.get("park_names") if isinstance(extra.get("park_names"), dict) else {}
+            name = str(names.get(ref, "")).strip()
+            name_txt = f" {name}" if name else ""
+            return f"<b style='color:{style.MULT}'>{ref}</b>{name_txt}{loc_txt}"
+        # Multiple parks at one site: an "N-fer".
+        in_txt = f" in {location}" if location else ""
+        return f"<b style='color:{style.MULT}'>{len(parks)}-fer</b>{in_txt}"
 
     def _build_entry_row(self) -> QWidget:
         row = QWidget()
@@ -2259,34 +2339,9 @@ class MainWindow(QMainWindow):
     # refresh (fired by the session on any log change)
     # ------------------------------------------------------------------ #
     def refresh(self) -> None:
-        self._update_score_bar()
+        self._update_station_bar()
         self._refresh_indicators()
         self._reload_table()
-
-    def _update_score_bar(self) -> None:
-        s = self.session.score()
-        peers = len(self.session.peers)
-        peer_txt = (
-            f" &nbsp;|&nbsp; Peers <b style='color:{style.PEER}'>{peers}</b>" if peers else ""
-        )
-        call = self.session.config.my_call
-        operator = self.session.engine.operator
-        name = self.session.contest.name
-        mult_label = self.session.contest.mult_label
-        mult_total = self.session.contest.mult_total
-        mult_txt = f"{s.mult_count}/{mult_total}" if mult_total else f"{s.mult_count}"
-        op_txt = (
-            f" <span style='color:{style.TEXT_DIM}'>op</span> {operator}"
-            if operator and operator != call
-            else ""
-        )
-        self._score_label.setText(
-            f"<span style='color:{style.TEXT_DIM}'>Station</span> "
-            f"<b style='color:{style.ACCENT}'>{call}</b>{op_txt} &nbsp;·&nbsp; {name} "
-            f"&nbsp;|&nbsp; "
-            f"QSOs <b style='color:{style.TEXT}'>{s.qso_count}</b> &nbsp; "
-            f"{mult_label} <b style='color:{style.MULT}'>{mult_txt}</b>{peer_txt}"
-        )
 
     def _reload_table(self) -> None:
         if self._call_filter:
@@ -2386,7 +2441,9 @@ class MainWindow(QMainWindow):
         log_path = getattr(self.session.store, "path", "")
         out_dir = Path(log_path).resolve().parent if log_path and log_path != ":memory:" else None
         call = self.session.config.my_call
-        park = str(self.session.config.extra.get("park", "") or "")
+        # For a multi-park (n-fer) log, use the first park in the filename — commas
+        # don't belong in filenames and the full list is inside the ADIF anyway.
+        park = str(self.session.config.extra.get("park", "") or "").split(",")[0].strip()
         name = park_adif_name(call, park, utcnow(), at_sign=_fs_supports_at_sign(out_dir))
         return str(out_dir / name) if out_dir is not None else name
 

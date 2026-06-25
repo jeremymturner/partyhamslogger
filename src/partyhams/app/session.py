@@ -167,6 +167,40 @@ class LogSession:
         self.store.set_meta("operator", op)
         self._emit()
 
+    def update_config(
+        self,
+        *,
+        my_call: str,
+        operator: str,
+        sent_exchange: dict[str, str],
+        extra: dict[str, object],
+    ) -> None:
+        """Edit the log's station config in place and persist it to the log file.
+
+        Covers the station call, operator, sent exchange, and contest-specific
+        fields (e.g. POTA park/entity/location). The contest type and sync network
+        are fixed when the log is created and are not changed here. Affects future
+        QSOs + presence; already-logged QSOs keep the call/operator they were
+        recorded under.
+        """
+        my_call = my_call.strip().upper()
+        operator = operator.strip().upper() or my_call
+        # Merge over the existing extra so values not exposed in the editor (e.g.
+        # bonus_points, set at creation) are preserved.
+        self.config.my_call = my_call
+        self.config.sent_exchange = dict(sent_exchange)
+        self.config.extra = {**self.config.extra, **extra}
+        # Station identity for new QSOs + presence broadcasts.
+        self.engine.call = my_call
+        self.engine.operator = operator
+        self.engine._status["call"] = my_call
+        self.engine._status["operator"] = operator
+        self.store.set_meta("my_call", my_call)
+        self.store.set_meta("operator", operator)
+        self.store.set_meta("sent_exchange", json.dumps(self.config.sent_exchange))
+        self.store.set_meta("extra", json.dumps(self.config.extra))
+        self._emit()
+
     def station_rates(self, station_id: str, now=None) -> dict[int, int]:
         """Cumulative QSO counts for a station within each rate window."""
         now = now or utcnow()
