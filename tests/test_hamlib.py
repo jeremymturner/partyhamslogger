@@ -60,6 +60,45 @@ async def test_ptt_and_cw():
     await fake.stop()
 
 
+async def test_read_and_set_wpm():
+    fake = FakeRigctld()
+    host, port = await fake.start()
+    radio = HamlibRadio(host, port)
+    await radio.connect()
+
+    await radio.set_wpm(22)
+    assert fake.levels.get("KEYSPD") == "22"
+    assert await radio.read_wpm() == 22
+
+    # read_state surfaces the keyer speed once the rig reports it.
+    state = await radio.read_state()
+    assert state.wpm == 22
+
+    await radio.disconnect()
+    await fake.stop()
+
+
+async def test_read_state_wpm_latches_off_when_unsupported():
+    fake = FakeRigctld()
+    host, port = await fake.start()
+    radio = HamlibRadio(host, port)
+    await radio.connect()
+
+    # First poll probes KEYSPD, fails (no level), and disables further probes.
+    state = await radio.read_state()
+    assert state.wpm is None
+    assert radio._keyspd_ok is False
+
+    # Even after the operator sets a speed, we no longer poll it in read_state
+    # (the latch stays off for the session) — but an explicit read still works.
+    await radio.set_wpm(30)
+    assert (await radio.read_state()).wpm is None
+    assert await radio.read_wpm() == 30
+
+    await radio.disconnect()
+    await fake.stop()
+
+
 async def test_stop_tx_aborts_cw_and_drops_ptt():
     fake = FakeRigctld()
     host, port = await fake.start()

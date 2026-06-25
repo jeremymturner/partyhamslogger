@@ -37,12 +37,18 @@ from PySide6.QtWidgets import (
 
 from partyhams.app.banter import StationSnapshot, choose_message
 from partyhams.app.macros import (
+    CW_SPEED_LABELS,
+    CW_SPEED_MODES,
+    CW_SPEED_RESTORE,
+    CW_SPEED_SYNC,
     CW_WPM_PRESETS,
     bank_key,
     clamp_wpm,
+    cw_duration_seconds,
     esm_step,
     expand,
     load_macros,
+    normalize_cw_speed_mode,
     save_macros,
 )
 from partyhams.app.radio import RadioPoller
@@ -65,7 +71,7 @@ from partyhams.core.models import (
     mode_group_for,
     utcnow,
 )
-from partyhams.export import timestamped_adif_name
+from partyhams.export import park_adif_name, timestamped_adif_name
 from partyhams.qrz import QrzClient, format_record
 from partyhams.radio.base import Capability, RadioState
 from partyhams.refdata import RefData
@@ -152,6 +158,28 @@ def clamp_export_minutes(minutes: int) -> int:
     return max(AUTOEXPORT_MIN, min(AUTOEXPORT_MAX, int(minutes)))
 
 
+def _fs_supports_at_sign(directory: Path | None = None) -> bool:
+    """Best-effort: can the target filesystem hold an ``@`` in a filename?
+
+    Probes by creating and deleting a tiny file with an ``@`` in its name in
+    ``directory`` (falling back to the system temp dir). Any failure — ``@``
+    rejected, dir missing, or not writable — returns ``False`` so we use the
+    always-safe ``_`` separator instead.
+    """
+    import os
+    import tempfile
+
+    probe_dir = str(directory) if directory is not None else tempfile.gettempdir()
+    probe = os.path.join(probe_dir, f".partyhams_at_probe@{os.getpid()}")
+    try:
+        with open(probe, "w"):
+            pass
+        os.unlink(probe)
+        return True
+    except OSError:
+        return False
+
+
 def should_autoexport(
     enabled: bool, only_if_new: bool, current_count: int, last_count: int
 ) -> bool:
@@ -188,6 +216,15 @@ class MainWindow(QMainWindow):
         self._call_filter = ""
         self._autocq = False  # Auto-CQ: repeat F1 on a timer while in Run mode
         self._autocq_interval = 10  # seconds; set from app state via set_autocq_interval
+        # CW keyer-speed ownership (Radio menu). Set from app state via
+        # set_cw_speed_mode; the app persists changes via on_change_cw_speed_mode.
+        self._cw_speed_mode = CW_SPEED_SYNC
+        self.on_change_cw_speed_mode: Callable[[str], None] | None = None
+        self._cw_speed_actions: dict[str, object] = {}
+        # "Restore after sending" bookkeeping: the radio's own speed to restore to,
+        # and the pending restore task (cancelled/rescheduled across rapid sends).
+        self._cw_restore_wpm: int | None = None
+        self._cw_restore_task: asyncio.Task | None = None
         #: Set by the app: on_autocq_interval(secs) persists the chosen interval.
         self.on_autocq_interval: Callable[[int], None] | None = None
         # Periodic ADIF auto-export settings (driven from app state).
@@ -863,9 +900,13 @@ class MainWindow(QMainWindow):
         hbox.addWidget(self._cw_keyboard, stretch=1)
         return bar
 
-    def _set_wpm(self, wpm: int) -> None:
-        """Set the CW keyer speed, persist it with the event's macros, and (if a
-        keyer is connected) push it to the rig so it takes effect immediately."""
+    def _set_wpm(self, wpm: int, *, source: str = "user") -> None:
+        """Set the CW keyer speed and persist it with the event's macros.
+
+        ``source="user"`` means the operator changed it here (a button/arrow): in
+        Sync mode that change is pushed straight to the radio. ``source="radio"``
+        means we're adopting a change the operator made on the rig (Sync mode), so
+        we must *not* echo it back."""
         wpm = clamp_wpm(wpm)
         if wpm == self._macros.cw_wpm:
             self._update_cw_bar()
@@ -874,9 +915,65 @@ class MainWindow(QMainWindow):
         save_macros(self.session.contest.id, self._macros)
         self._update_cw_bar()
         self.statusBar().showMessage(f"CW speed {wpm} WPM", 1500)
+        if source == "user" and self._cw_speed_mode == CW_SPEED_SYNC:
+            self._push_wpm_to_radio(wpm)
 
     def _bump_wpm(self, delta: int) -> None:
         self._set_wpm(self._macros.cw_wpm + delta)
+
+    # --- CW keyer-speed ownership modes (Radio menu) --- #
+    def _build_cw_speed_menu(self, radio_menu) -> None:
+        """Submenu picking who owns the keyer speed: restore / always / sync."""
+        menu = radio_menu.addMenu("CW Speed Control")
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        for mode in CW_SPEED_MODES:
+            action = menu.addAction(CW_SPEED_LABELS[mode])
+            action.setCheckable(True)
+            action.setActionGroup(group)
+            action.triggered.connect(lambda _checked=False, m=mode: self._choose_cw_speed_mode(m))
+            self._cw_speed_actions[mode] = action
+        self._sync_cw_speed_menu()
+
+    def _sync_cw_speed_menu(self) -> None:
+        action = self._cw_speed_actions.get(self._cw_speed_mode)
+        if action is not None:
+            action.setChecked(True)
+
+    def set_cw_speed_mode(self, mode: str) -> None:
+        """Apply a CW-speed mode (from app state); does not persist."""
+        self._cw_speed_mode = normalize_cw_speed_mode(mode)
+        self._sync_cw_speed_menu()
+
+    def _choose_cw_speed_mode(self, mode: str) -> None:
+        """Operator picked a mode from the menu: apply, persist, and (Sync) align
+        the rig to the logger's current speed right away."""
+        self.set_cw_speed_mode(mode)
+        if self.on_change_cw_speed_mode is not None:
+            self.on_change_cw_speed_mode(self._cw_speed_mode)
+        self.statusBar().showMessage(f"CW speed: {CW_SPEED_LABELS[self._cw_speed_mode]}", 2500)
+        if self._cw_speed_mode == CW_SPEED_SYNC:
+            self._push_wpm_to_radio(self._macros.cw_wpm)
+
+    def _keyer_radio(self):  # noqa: ANN202 - a Radio or None
+        """The connected radio iff it can set keyer speed, else None."""
+        radio = self._poller.radio if self._poller is not None else None
+        if radio is None or not radio.supports(Capability.KEYER_SPEED):
+            return None
+        return radio
+
+    def _push_wpm_to_radio(self, wpm: int) -> None:
+        """Fire-and-forget: set the rig's keyer speed to ``wpm`` (Sync mode)."""
+        radio = self._keyer_radio()
+        if radio is None or self._loop is None or not self._loop.is_running():
+            return
+        self._loop.create_task(self._do_set_wpm(radio, wpm))
+
+    async def _do_set_wpm(self, radio, wpm: int) -> None:
+        try:
+            await radio.set_wpm(wpm)
+        except Exception as exc:  # noqa: BLE001 - never crash on a keyer-speed push
+            self.statusBar().showMessage(f"Set radio WPM failed: {exc}", 3000)
 
     def _update_cw_bar(self) -> None:
         wpm = self._macros.cw_wpm
@@ -1039,13 +1136,55 @@ class MainWindow(QMainWindow):
         self, radio, text: str, tx_desc: tuple[int, str, str] | None = None
     ) -> None:
         try:
-            await radio.send_cw(text, wpm=self._macros.cw_wpm)
+            restore = self._cw_speed_mode == CW_SPEED_RESTORE and radio.supports(
+                Capability.KEYER_SPEED
+            )
+            if restore:
+                await self._send_cw_then_restore(radio, text)
+            else:
+                # Always / Sync: assert the logger's speed on the way out. (In Sync
+                # the rig already matches, so this is just a harmless re-assert.)
+                await radio.send_cw(text, wpm=self._macros.cw_wpm)
             if tx_desc is not None:
                 self._show_tx_status("SENT", tx_desc, timeout=5000)
             else:
                 self.statusBar().showMessage(f"CW: {text}", 2500)
         except Exception as exc:  # noqa: BLE001 - surface keyer errors, don't crash
             self.statusBar().showMessage(f"CW failed: {exc}", 4000)
+
+    async def _send_cw_then_restore(self, radio, text: str) -> None:
+        """Restore mode: remember the rig's own speed, key at the logger's speed,
+        then schedule a restore to the rig's speed once keying should be done."""
+        if self._cw_restore_wpm is None:  # first send of a burst: capture the knob
+            try:
+                self._cw_restore_wpm = await radio.read_wpm()
+            except Exception:  # noqa: BLE001 - if we can't read it, we can't restore
+                self._cw_restore_wpm = None
+        await radio.send_cw(text, wpm=self._macros.cw_wpm)
+        self._schedule_cw_restore(radio, text)
+
+    def _schedule_cw_restore(self, radio, text: str) -> None:
+        if self._cw_restore_wpm is None or self._loop is None or not self._loop.is_running():
+            return
+        if self._cw_restore_task is not None:
+            self._cw_restore_task.cancel()  # a newer send supersedes the pending restore
+        # Pad the estimate: restoring late is harmless, early would change speed mid-CW.
+        delay = cw_duration_seconds(text, self._macros.cw_wpm) * 1.2 + 0.5
+        self._cw_restore_task = self._loop.create_task(self._restore_cw_after(radio, delay))
+
+    async def _restore_cw_after(self, radio, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return  # superseded by a newer send — keep the captured speed for later
+        prev = self._cw_restore_wpm
+        self._cw_restore_wpm = None
+        self._cw_restore_task = None
+        if prev is not None:
+            try:
+                await radio.set_wpm(prev)
+            except Exception as exc:  # noqa: BLE001 - best-effort restore
+                self.statusBar().showMessage(f"Restore radio WPM failed: {exc}", 3000)
 
     def _show_tx_status(self, word: str, tx_desc: tuple[int, str, str], timeout: int) -> None:
         """Left-of-status indicator: ``TRANSMITTING — F1 — CQ — CQ FD W7ABC``."""
@@ -1179,6 +1318,7 @@ class MainWindow(QMainWindow):
         select_radio.setStatusTip(
             "Choose how to read the rig (Hamlib, FlexRadio, Icom CI-V/LAN) or stay manual"
         )
+        self._build_cw_speed_menu(radio_menu)
 
         self._build_wsjtx_menu()
 
@@ -1887,9 +2027,19 @@ class MainWindow(QMainWindow):
         mode_idx = self._mode.findData(state.mode)
         if mode_idx >= 0:
             self._mode.setCurrentIndex(mode_idx)
+        self._maybe_follow_radio_wpm(state)
         self._maybe_warn_worked_here(state)
         self._refresh_indicators()  # updates dupe/mult badges + the freq readout
         self._update_radio_label()  # model/nickname may have just arrived
+
+    def _maybe_follow_radio_wpm(self, state: RadioState) -> None:
+        """Sync mode: adopt a keyer-speed change made on the radio into the logger
+        (without echoing it back). A pending Restore-mode capture is ignored — the
+        rig is at the logger's speed mid-burst, not the operator's chosen speed."""
+        if self._cw_speed_mode != CW_SPEED_SYNC or state.wpm is None:
+            return
+        if state.wpm != self._macros.cw_wpm:
+            self._set_wpm(state.wpm, source="radio")
 
     def _maybe_warn_worked_here(self, state: RadioState) -> None:
         """Search & Pounce convenience (issue #1): on a QSY to a new frequency with
@@ -2222,10 +2372,23 @@ class MainWindow(QMainWindow):
     # export
     # ------------------------------------------------------------------ #
     def _export_adif(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Export ADIF", "partyhams.adi", "ADIF (*.adi)")
+        suggested = self._default_adif_path()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export ADIF", suggested, "ADIF (*.adi *.adif)"
+        )
         if path:
             Path(path).write_text(self.session.export_adif())
             self.statusBar().showMessage(f"Exported ADIF to {path}", 4000)
+
+    def _default_adif_path(self) -> str:
+        """Suggested export path: ``CALL@PARK_YYYYMMDD.adif`` in the log's folder
+        (``@`` swapped for ``_`` on a filesystem that can't store it)."""
+        log_path = getattr(self.session.store, "path", "")
+        out_dir = Path(log_path).resolve().parent if log_path and log_path != ":memory:" else None
+        call = self.session.config.my_call
+        park = str(self.session.config.extra.get("park", "") or "")
+        name = park_adif_name(call, park, utcnow(), at_sign=_fs_supports_at_sign(out_dir))
+        return str(out_dir / name) if out_dir is not None else name
 
     def _export_cabrillo(self) -> None:
         path, _ = QFileDialog.getSaveFileName(

@@ -74,6 +74,25 @@ def _fmt_mode(mode: str, ft_tx_even: int) -> str:
     return mode or "—"
 
 
+#: Marker shown on a peer's Op cell once we haven't heard a presence beat from
+#: it in over two minutes (see ``session.SILENT_AFTER_S``).
+SILENT_ICON = "⚠"
+
+
+def _fmt_silence(secs: float | None) -> str:
+    """Humanize seconds-since-last-heard for the silent-peer tooltip."""
+    if secs is None:
+        return "no presence received yet"
+    total = int(secs)
+    if total < 60:
+        return f"{total}s ago"
+    mins, rem = divmod(total, 60)
+    if mins < 60:
+        return f"{mins}m {rem}s ago"
+    hrs, mins = divmod(mins, 60)
+    return f"{hrs}h {mins}m ago"
+
+
 def _radio_line(row: dict | None) -> str:
     """One-line summary of a station's power / SWR / FT8-FT4 Tx sequence.
 
@@ -326,9 +345,19 @@ class NetworkPanel(QWidget):
         for i, r in enumerate(rows):
             rates = r["rates"]
             clock_off = r.get("clock_off")
+            silent = r.get("silent")
+            gone = r.get("gone")
             op = r["operator"] or "?"
+            # Op cell marker: silent (no presence >2m) takes precedence over the
+            # clock-drift marker, since a vanished station's drift is moot.
+            if silent:
+                op_cell = f"{SILENT_ICON} {op}"
+            elif clock_off:
+                op_cell = f"⏰ {op}"
+            else:
+                op_cell = op
             values = [
-                f"⏰ {op}" if clock_off else op,  # clock-drift marker on the Op cell
+                op_cell,
                 _fmt_freq(r["freq_hz"]),
                 _fmt_mode(r["mode"], r["ft_tx_even"]),
                 str(rates[15]),
@@ -343,7 +372,26 @@ class NetworkPanel(QWidget):
                     item.setForeground(QColor(style.ACCENT))
                 elif r["stale"]:
                     item.setForeground(QColor(style.TEXT_DIM))
-                if col == 0 and clock_off:
+                if col == 0 and gone:
+                    # Struck through after five minutes of silence — almost
+                    # certainly dropped off the network.
+                    font = item.font()
+                    font.setStrikeOut(True)
+                    item.setFont(font)
+                    item.setForeground(QColor(style.AMBER))
+                    item.setToolTip(
+                        f"No update from this station in over 5 minutes "
+                        f"(last heard {_fmt_silence(r.get('silent_secs'))}) — "
+                        "it has almost certainly gone offline."
+                    )
+                elif col == 0 and silent:
+                    item.setForeground(QColor(style.AMBER))
+                    item.setToolTip(
+                        f"No update from this station in over 2 minutes "
+                        f"(last heard {_fmt_silence(r.get('silent_secs'))}) — "
+                        "it may have gone offline."
+                    )
+                elif col == 0 and clock_off:
                     offset = r.get("clock_offset") or 0.0
                     item.setForeground(QColor(style.AMBER))
                     item.setToolTip(

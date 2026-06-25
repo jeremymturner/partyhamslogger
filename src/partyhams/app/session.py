@@ -29,6 +29,14 @@ from partyhams.net.transport import MulticastTransport, NullTransport
 
 RATE_WINDOWS_MIN = (15, 30, 60)  # QSO-rate windows shown in the network panel
 
+# Presence thresholds (seconds since a peer's last StationStatus). A station
+# broadcasts status every 3s, so "stale" dims it after a few missed beats,
+# "silent" flags it as probably-gone after two minutes, and "gone" strikes it
+# through after five — escalating confidence that the station has dropped off.
+STALE_AFTER_S = 20
+SILENT_AFTER_S = 120
+GONE_AFTER_S = 300
+
 
 def default_rst(mode: Mode) -> str:
     """Sensible default report: ``59`` for phone, ``599`` otherwise."""
@@ -219,7 +227,15 @@ class LogSession:
 
     def _station_row(self, sid: str, info: dict, is_self: bool, now) -> dict:
         last_heard = info.get("last_heard")
-        stale = (not is_self) and (last_heard is None or (now - last_heard).total_seconds() > 20)
+        # Seconds since we last heard a presence beat (None for self / never-heard).
+        silent_secs = (
+            None if (is_self or last_heard is None) else (now - last_heard).total_seconds()
+        )
+        stale = silent_secs is not None and silent_secs > STALE_AFTER_S
+        # Probably gone: no presence for SILENT_AFTER_S (also true if never heard).
+        silent = (not is_self) and (last_heard is None or silent_secs > SILENT_AFTER_S)
+        # Almost certainly dropped: no presence for GONE_AFTER_S (five minutes).
+        gone = (not is_self) and (last_heard is None or silent_secs > GONE_AFTER_S)
         return {
             "station_id": sid,
             "operator": info.get("operator", ""),
@@ -228,6 +244,12 @@ class LogSession:
             "mode": info.get("mode", ""),
             "is_self": is_self,
             "stale": stale,
+            # No presence beat for over two minutes — likely offline. ``silent_secs``
+            # is how long it's been (None if self/never-heard) for the tooltip.
+            "silent": silent,
+            "silent_secs": silent_secs,
+            # No presence beat for over five minutes — render struck-through.
+            "gone": gone,
             # Apparent clock offset vs us (seconds, peer-ahead positive) and whether
             # it exceeds the sync threshold. None/False for self and unheard peers.
             # NB: offset includes network latency — see partyhams.net.clocksync.

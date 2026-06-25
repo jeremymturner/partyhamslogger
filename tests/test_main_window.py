@@ -750,3 +750,158 @@ def test_disabled_auto_update_skips_check_unless_forced():
     w._check_for_update()  # disabled + not forced -> no-op
     w._check_for_update(force=True)  # forced -> reaches the (no-loop) guard, still no-op
     assert calls == []  # nothing blew up; both paths handled gracefully
+
+
+# --- CW keyer-speed ownership modes ---------------------------------------- #
+class _FakeKeyerRadio:
+    """A radio that can read/set keyer speed, recording every call."""
+
+    def __init__(self, wpm: int = 20) -> None:
+        self._wpm = wpm
+        self.sent: list[tuple[str, int | None]] = []
+        self.set_calls: list[int] = []
+
+    def supports(self, _cap) -> bool:
+        return True
+
+    async def read_wpm(self) -> int | None:
+        return self._wpm
+
+    async def set_wpm(self, wpm: int) -> None:
+        self._wpm = wpm
+        self.set_calls.append(wpm)
+
+    async def send_cw(self, text: str, wpm: int | None = None) -> None:
+        if wpm is not None:
+            self._wpm = wpm
+        self.sent.append((text, wpm))
+
+
+def test_cw_speed_menu_reflects_and_persists_mode():
+    w = _window()
+    saved: list[str] = []
+    w.on_change_cw_speed_mode = saved.append
+
+    w.set_cw_speed_mode("restore")
+    assert w._cw_speed_mode == "restore"
+    assert w._cw_speed_actions["restore"].isChecked()
+    assert not w._cw_speed_actions["sync"].isChecked()
+    assert saved == []  # set_* applies but does not persist
+
+    w._choose_cw_speed_mode("always")  # simulate a menu click
+    assert w._cw_speed_mode == "always"
+    assert w._cw_speed_actions["always"].isChecked()
+    assert saved == ["always"]  # menu choice persists via the callback
+
+    # An unknown stored value falls back to the default (sync).
+    w.set_cw_speed_mode("bogus")
+    assert w._cw_speed_mode == "sync"
+
+
+def test_sync_mode_adopts_radio_wpm_other_modes_ignore_it():
+    w = _window()
+    w._macros.cw_wpm = 28
+
+    # Sync: a keyer-speed change reported by the rig is adopted by the logger.
+    w.set_cw_speed_mode("sync")
+    w._maybe_follow_radio_wpm(RadioState(freq_hz=14_040_000, mode=Mode.CW, wpm=22))
+    assert w._macros.cw_wpm == 22
+
+    # A state with no wpm (rig can't report it) leaves the logger untouched.
+    w._maybe_follow_radio_wpm(RadioState(freq_hz=14_040_000, mode=Mode.CW, wpm=None))
+    assert w._macros.cw_wpm == 22
+
+    # Other modes never follow the radio.
+    for mode in ("restore", "always"):
+        w.set_cw_speed_mode(mode)
+        w._maybe_follow_radio_wpm(RadioState(freq_hz=14_040_000, mode=Mode.CW, wpm=35))
+        assert w._macros.cw_wpm == 22
+
+
+async def test_restore_mode_keys_at_logger_speed_then_restores():
+    w = _window()
+    w._macros.cw_wpm = 30
+    w.set_cw_speed_mode("restore")
+    radio = _FakeKeyerRadio(wpm=18)  # the operator's speed on the rig
+
+    await w._send_cw_then_restore(radio, "CQ TEST")
+    # Captured the rig's own speed and keyed at the logger's speed.
+    assert w._cw_restore_wpm == 18
+    assert radio.sent == [("CQ TEST", 30)]
+    assert radio._wpm == 30
+
+    # Once keying is done, the rig's own speed is restored and state cleared.
+    await w._restore_cw_after(radio, 0)
+    assert radio._wpm == 18
+    assert w._cw_restore_wpm is None
+
+
+async def test_restore_mode_overlapping_sends_keep_original_speed():
+    w = _window()
+    w._macros.cw_wpm = 30
+    w.set_cw_speed_mode("restore")
+    radio = _FakeKeyerRadio(wpm=18)
+
+    await w._send_cw_then_restore(radio, "CQ")
+    # A second send before the restore fires must not re-capture (rig is at 30 now).
+    await w._send_cw_then_restore(radio, "TEST")
+    assert w._cw_restore_wpm == 18  # still the original knob speed, not 30
+
+    await w._restore_cw_after(radio, 0)
+    assert radio._wpm == 18
+
+
+async def test_do_set_wpm_pushes_to_radio():
+    w = _window()
+    radio = _FakeKeyerRadio(wpm=20)
+    await w._do_set_wpm(radio, 33)
+    assert radio.set_calls == [33]
+    assert radio._wpm == 33
+
+
+# --- ADIF export default filename ------------------------------------------ #
+def test_default_adif_path_uses_call_and_park():
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    s = build_session(
+        contest_id="pota",
+        my_call="W7ABC",
+        sent_exchange={},
+        extra={"park": "US-1234"},
+        network=None,
+        db_path=":memory:",
+    )
+    w = MainWindow(s)
+    name = Path(w._default_adif_path()).name
+    assert name.startswith("W7ABC")
+    assert "US-1234" in name  # park reference kept, dash intact
+    assert name.endswith(".adif")
+    # Separator is @ or _ depending on the filesystem probe, but never both ways.
+    assert ("W7ABC@US-1234" in name) or ("W7ABC_US-1234" in name)
+
+
+def test_default_adif_path_without_park_omits_park_segment():
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W7ABC",
+        sent_exchange={"class": "1E", "section": "OR"},
+        network=None,
+        db_path=":memory:",
+    )
+    w = MainWindow(s)
+    name = Path(w._default_adif_path()).name
+    assert name.startswith("W7ABC_")
+    assert "@" not in name  # no park -> no @ segment
+    assert name.endswith(".adif")

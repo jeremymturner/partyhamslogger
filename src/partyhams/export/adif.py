@@ -26,6 +26,30 @@ def timestamped_adif_name(call: str, contest_id: str, when: datetime) -> str:
     return f"{safe}-{contest_id}-{when.strftime('%Y%m%d-%H%M%S')}.adi"
 
 
+def _safe_filename_part(value: str, *, keep_dash: bool = False) -> str:
+    """Collapse anything not filename-safe into ``_`` (optionally keeping ``-``)."""
+    allowed = "A-Za-z0-9-" if keep_dash else "A-Za-z0-9"
+    return re.sub(rf"[^{allowed}]+", "_", value).strip("_")
+
+
+def park_adif_name(call: str, park: str, when: datetime, *, at_sign: bool = True) -> str:
+    """Default name for a manual ADIF export: ``CALL@PARK_YYYYMMDD.adif``.
+
+    The ``@`` joins the callsign and the (POTA) park reference; on a filesystem
+    that can't store ``@`` the caller passes ``at_sign=False`` and we substitute
+    ``_`` instead (``CALL_PARK_YYYYMMDD.adif``). When no park is set the park
+    segment is dropped entirely (``CALL_YYYYMMDD.adif``). Park references keep
+    their dash (``US-1234``); other unsafe characters become ``_``.
+    """
+    call_part = _safe_filename_part(call) or "log"
+    park_part = _safe_filename_part(park, keep_dash=True)
+    date = when.strftime("%Y%m%d")
+    if not park_part:
+        return f"{call_part}_{date}.adif"
+    sep = "@" if at_sign else "_"
+    return f"{call_part}{sep}{park_part}_{date}.adif"
+
+
 # our Mode -> ADIF (MODE, SUBMODE). ADIF treats some modes as submodes of a
 # parent: FT4 is a submode of MFSK, PSK31 a submode of PSK. FT8 is its own
 # top-level MODE (no submode). A None submode means "emit MODE only".

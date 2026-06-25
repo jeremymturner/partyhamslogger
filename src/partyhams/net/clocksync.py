@@ -10,8 +10,8 @@ one-way network transit time (typically a few ms on a LAN, but unbounded in the
 general case) is folded into the apparent offset, and we never see the round-trip
 so we cannot subtract it out. The numbers here are therefore a *best-effort*
 indicator, not a precise measurement: a small apparent offset is far more likely
-transit latency than a real misconfigured clock. The threshold is deliberately
-set at the spec's 0.2s alignment target; anything under that is treated as fine.
+transit latency than a real misconfigured clock. The threshold is therefore set
+generously (0.8s); anything at or under that is treated as fine.
 
 These functions are deliberately pure (no Qt, no implicit wall-clock reads — the
 caller passes ``local_now``) so they are trivially unit-testable.
@@ -21,10 +21,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-#: Apparent-offset threshold, in seconds. Matches the spec's 0.2s alignment
-#: target. Apparent offsets below this are treated as in-sync (and are in any
-#: case within the noise of network transit latency — see the module docstring).
-CLOCK_OFF_THRESHOLD_S = 0.2
+#: Apparent-offset threshold, in seconds. Apparent offsets at or below this are
+#: treated as in-sync — set generously so normal network transit latency doesn't
+#: trip a false clock-off warning (see the module docstring).
+CLOCK_OFF_THRESHOLD_S = 0.8
 
 
 def clock_offset_seconds(sender_iso: str, local_now: datetime) -> float | None:

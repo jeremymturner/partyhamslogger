@@ -26,6 +26,7 @@ class Capability(enum.Flag):
     S_METER = enum.auto()
     RIT_XIT = enum.auto()
     SEND_CW = enum.auto()
+    KEYER_SPEED = enum.auto()  # read/set the CW keyer speed (WPM) without keying
     SUB_RECEIVER = enum.auto()  # Flex slices / IC-7610 dual receive
     SPECTRUM = enum.auto()
 
@@ -44,6 +45,7 @@ class RadioState:
     split: bool = False
     ptt: bool = False
     s_meter_db: int | None = None  # dB relative to S9, if available
+    wpm: int | None = None  # CW keyer speed, if the backend reports it (else None)
 
 
 class Radio(ABC):
@@ -93,6 +95,20 @@ class Radio(ABC):
     async def send_cw(self, text: str, wpm: int | None = None) -> None:
         """Send CW via the rig's keyer. Override if ``Capability.SEND_CW``."""
         raise RadioUnsupported(f"{self.backend_name} does not support CW keying")
+
+    async def read_wpm(self) -> int | None:
+        """Current keyer speed in WPM, or ``None`` if the backend can't report it.
+
+        Override if ``Capability.KEYER_SPEED``. Used by the logger's CW-speed
+        modes that need to know (or restore) the rig's own speed; a ``None`` here
+        makes those modes degrade gracefully to "set-only".
+        """
+        return None
+
+    async def set_wpm(self, wpm: int) -> None:
+        """Set the keyer speed (WPM) without keying any text. Override if
+        ``Capability.KEYER_SPEED``."""
+        raise RadioUnsupported(f"{self.backend_name} does not support setting keyer speed")
 
     async def stop_tx(self) -> None:
         """Immediately stop transmitting — abort CW and drop PTT (emergency stop).

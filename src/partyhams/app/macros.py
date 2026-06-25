@@ -27,10 +27,49 @@ WPM_MIN = 5
 WPM_MAX = 60
 CW_WPM_PRESETS: tuple[int, ...] = (18, 20, 24, 28, 30)
 
+# Who owns the CW keyer speed when a radio is connected (see the Radio menu):
+#   RESTORE — the logger sets its speed while keying, then restores the radio's
+#             own speed when it stops sending (the rig's knob "wins" between sends).
+#   ALWAYS  — the logger asserts its speed on every transmission.
+#   SYNC    — the logger follows speed changes made on the radio, and pushes its
+#             own changes to the radio immediately (both stay in agreement).
+CW_SPEED_RESTORE = "restore"
+CW_SPEED_ALWAYS = "always"
+CW_SPEED_SYNC = "sync"
+CW_SPEED_MODES: tuple[str, ...] = (CW_SPEED_RESTORE, CW_SPEED_ALWAYS, CW_SPEED_SYNC)
+CW_SPEED_DEFAULT = CW_SPEED_SYNC
+
+# Human-readable menu labels, in display order.
+CW_SPEED_LABELS: dict[str, str] = {
+    CW_SPEED_RESTORE: "Restore radio speed after sending",
+    CW_SPEED_ALWAYS: "Logger always sets speed",
+    CW_SPEED_SYNC: "Sync with radio",
+}
+
 
 def clamp_wpm(wpm: int) -> int:
     """Clamp a CW keyer speed into the supported WPM range."""
     return max(WPM_MIN, min(WPM_MAX, int(wpm)))
+
+
+def normalize_cw_speed_mode(mode: str | None) -> str:
+    """Coerce a persisted/selected CW-speed mode to a known value (else default)."""
+    return mode if mode in CW_SPEED_MODES else CW_SPEED_DEFAULT
+
+
+def cw_duration_seconds(text: str, wpm: int) -> float:
+    """Best-effort estimate of how long ``text`` takes to key at ``wpm``.
+
+    Uses the PARIS standard (one dot-unit = 1.2/wpm seconds) and a rough average
+    of ten dot-units per character (including inter-character/word spacing). Used
+    only to schedule the "restore radio speed after sending" so the restore lands
+    *after* keying finishes; an overestimate is harmless, an underestimate would
+    change speed mid-CW, so callers pad it.
+    """
+    wpm = max(1, int(wpm))
+    dot = 1.2 / wpm
+    units = max(1, len(text)) * 10
+    return units * dot
 
 # Inline markers that trigger an action instead of being sent as text.
 _ACTIONS = {"LOG", "WIPE"}
