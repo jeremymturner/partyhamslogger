@@ -104,3 +104,27 @@ def test_clamp_wpm_bounds():
     assert clamp_wpm(WPM_MAX + 99) == WPM_MAX
     assert clamp_wpm(WPM_MIN) == WPM_MIN
     assert clamp_wpm(WPM_MAX) == WPM_MAX
+
+
+def test_normalize_cw_speed_mode():
+    from partyhams.app.macros import (
+        CW_SPEED_DEFAULT,
+        CW_SPEED_RESTORE,
+        normalize_cw_speed_mode,
+    )
+
+    assert normalize_cw_speed_mode("restore") == CW_SPEED_RESTORE
+    assert normalize_cw_speed_mode("sync") == "sync"
+    assert normalize_cw_speed_mode("bogus") == CW_SPEED_DEFAULT
+    assert normalize_cw_speed_mode(None) == CW_SPEED_DEFAULT
+
+
+def test_cw_duration_seconds_scales_with_length_and_speed():
+    from partyhams.app.macros import cw_duration_seconds
+
+    # Longer text takes longer; faster speed takes less time.
+    assert cw_duration_seconds("CQ TEST", 25) > cw_duration_seconds("CQ", 25)
+    assert cw_duration_seconds("CQ TEST", 40) < cw_duration_seconds("CQ TEST", 20)
+    # Always a positive, finite estimate (even for empty text / silly speeds).
+    assert cw_duration_seconds("", 25) > 0
+    assert cw_duration_seconds("X", 0) > 0  # wpm floored to 1, no ZeroDivision

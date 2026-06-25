@@ -205,6 +205,7 @@ class FlexRadio(Radio):
             | Capability.SUB_RECEIVER
             | Capability.SPECTRUM
             | Capability.SEND_CW
+            | Capability.KEYER_SPEED
         )
 
     # ------------------------------------------------------------------ #
@@ -280,6 +281,13 @@ class FlexRadio(Radio):
         if wpm is not None:
             await self._command(f"cwx wpm {wpm}")
         await self._command("cwx send " + text.replace(" ", "\x7f"))
+
+    async def set_wpm(self, wpm: int) -> None:
+        await self._command(f"cwx wpm {int(wpm)}")
+
+    # NOTE: no read_wpm override — SmartSDR reports CWX speed only via the async
+    # status stream, not a synchronous query, so it stays None (set-only). The
+    # restore/sync CW-speed modes degrade gracefully when read_wpm() is None.
 
     async def stop_tx(self) -> None:
         # Clear the CWX buffer — aborts CW in progress (best effort).

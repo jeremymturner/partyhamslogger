@@ -6,7 +6,7 @@ from datetime import datetime
 
 from partyhams.app.session import build_session
 from partyhams.core.models import Mode
-from partyhams.export import adif_to_mode, timestamped_adif_name
+from partyhams.export import adif_to_mode, park_adif_name, timestamped_adif_name
 
 FREQ_20M = 14_040_000
 
@@ -19,6 +19,19 @@ def test_timestamped_adif_name():
     # Slashes/odd characters in the call are sanitised; empty call falls back.
     assert timestamped_adif_name("VK3/AB1C", "cqww", when).startswith("VK3_AB1C-cqww-")
     assert timestamped_adif_name("", "x", when).startswith("log-x-")
+
+
+def test_park_adif_name():
+    when = datetime(2026, 6, 24, 9, 0, 0)
+    # @ supported: CALL@PARK_YYYYMMDD.adif, park keeps its dash.
+    assert park_adif_name("W7ABC", "US-1234", when) == "W7ABC@US-1234_20260624.adif"
+    # @ unsupported: underscore separator instead.
+    assert park_adif_name("W7ABC", "US-1234", when, at_sign=False) == "W7ABC_US-1234_20260624.adif"
+    # No park: drop the park segment entirely.
+    assert park_adif_name("W7ABC", "", when) == "W7ABC_20260624.adif"
+    # Odd characters in the call are sanitised; empty call falls back to "log".
+    assert park_adif_name("VK3/AB1C", "VK-0001", when) == "VK3_AB1C@VK-0001_20260624.adif"
+    assert park_adif_name("", "", when) == "log_20260624.adif"
 
 
 async def make_logged_session():

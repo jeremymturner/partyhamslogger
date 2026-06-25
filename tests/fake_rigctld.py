@@ -95,4 +95,9 @@ class FakeRigctld:
             if len(args) >= 2:
                 self.levels[args[0]] = args[1]
             return f"set_level: {' '.join(args)}\nRPRT 0\n"
+        if cmd == "l":  # get_level
+            name = args[0] if args else ""
+            if name not in self.levels:
+                return "RPRT -11\n"  # rig has no such level
+            return f"get_level: {name}\n{name}: {self.levels[name]}\nRPRT 0\n"
         return "RPRT -11\n"  # not implemented

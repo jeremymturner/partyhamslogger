@@ -50,13 +50,13 @@ def test_offset_none_for_blank_or_unparseable():
 def test_is_clock_off_beyond_threshold():
     assert is_clock_off(1.5) is True
     assert is_clock_off(-1.5) is True
-    assert is_clock_off(0.3) is True
+    assert is_clock_off(0.9) is True
 
 
 def test_is_clock_off_within_threshold():
     assert is_clock_off(0.0) is False
-    assert is_clock_off(0.1) is False
-    assert is_clock_off(-0.19) is False
+    assert is_clock_off(0.3) is False  # well within the 0.8s threshold now
+    assert is_clock_off(-0.79) is False
     assert is_clock_off(CLOCK_OFF_THRESHOLD_S) is False  # boundary: not "exceeds"
     assert is_clock_off(None) is False
 

@@ -30,6 +30,14 @@ _TO_HAMLIB: dict[Mode, str] = {
     Mode.FT4: "PKTUSB",
 }
 
+def _looks_numeric(value: str) -> bool:
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
+
+
 # hamlib mode token -> our Mode (best effort; passband is ignored)
 _FROM_HAMLIB: dict[str, Mode] = {
     "CW": Mode.CW,
@@ -56,6 +64,9 @@ class HamlibRadio(Radio):
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._lock = asyncio.Lock()
+        # Once a KEYSPD level read fails, stop polling it (rig lacks the level) so
+        # read_state() doesn't pay a failing round-trip on every poll.
+        self._keyspd_ok = True
 
     @property
     def capabilities(self) -> Capability:
@@ -67,6 +78,7 @@ class HamlibRadio(Radio):
             | Capability.PTT
             | Capability.S_METER
             | Capability.SEND_CW
+            | Capability.KEYER_SPEED
         )
 
     def description(self) -> str:
@@ -89,7 +101,22 @@ class HamlibRadio(Radio):
         mode_fields = await self._command("m")
         freq_hz = int(freq_fields.get("Frequency", "0"))
         mode_token = mode_fields.get("Mode", "CW")
-        return RadioState(freq_hz=freq_hz, mode=_FROM_HAMLIB.get(mode_token, Mode.CW))
+        return RadioState(
+            freq_hz=freq_hz,
+            mode=_FROM_HAMLIB.get(mode_token, Mode.CW),
+            wpm=await self._poll_wpm(),
+        )
+
+    async def _poll_wpm(self) -> int | None:
+        """Best-effort KEYSPD read for read_state; latches off on first failure so
+        a rig without a keyer-speed level isn't probed on every poll."""
+        if not self._keyspd_ok:
+            return None
+        try:
+            return await self.read_wpm()
+        except OSError:
+            self._keyspd_ok = False
+            return None
 
     async def set_frequency(self, freq_hz: int) -> None:
         await self._command(f"F {freq_hz}")
@@ -108,6 +135,24 @@ class HamlibRadio(Radio):
         if wpm is not None:
             await self._command(f"L KEYSPD {wpm}")
         await self._command(f"b {text}")
+
+    async def read_wpm(self) -> int | None:
+        """Read the keyer speed via ``l KEYSPD``. Returns ``None`` if the rig
+        reports no usable value (real rigctld labels the value ``KEYSPD: <n>``;
+        this path is unverified against hardware)."""
+        fields = await self._command("l KEYSPD")
+        raw = fields.get("KEYSPD")
+        if raw is None:
+            raw = next((v for v in fields.values() if _looks_numeric(v)), None)
+        if raw is None:
+            return None
+        try:
+            return int(round(float(raw)))
+        except ValueError:
+            return None
+
+    async def set_wpm(self, wpm: int) -> None:
+        await self._command(f"L KEYSPD {int(wpm)}")
 
     async def stop_tx(self) -> None:
         # Abort CW being keyed (\stop_morse), then drop PTT — best effort.

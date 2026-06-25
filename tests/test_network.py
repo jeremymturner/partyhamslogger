@@ -110,6 +110,48 @@ def test_remote_status_appears_in_roster():
     assert peer_row["is_self"] is False
 
 
+def test_peer_marked_silent_after_two_minutes():
+    s = make_session()
+    now = utcnow()
+    sid = "peer123"
+    s.engine.stations[sid] = {
+        "operator": "W7XYZ",
+        "call": "W7XYZ",
+        "freq_hz": 7_030_000,
+        "mode": "USB",
+        "power_w": 0.0,
+        "swr": 0.0,
+        "ft_tx_even": -1,
+        "last_heard": now - timedelta(seconds=10),
+    }
+    # Just heard from — not silent (and not yet stale).
+    row = next(r for r in s.roster() if r["station_id"] == sid)
+    assert row["silent"] is False
+    assert row["stale"] is False
+
+    # No presence beat for over two minutes — flagged silent (but not yet gone).
+    s.engine.stations[sid]["last_heard"] = now - timedelta(seconds=130)
+    row = next(r for r in s.roster() if r["station_id"] == sid)
+    assert row["silent"] is True
+    assert row["gone"] is False
+    assert row["stale"] is True
+    assert row["silent_secs"] >= 120
+
+    # No presence beat for over five minutes — flagged gone (struck through).
+    s.engine.stations[sid]["last_heard"] = now - timedelta(seconds=310)
+    row = next(r for r in s.roster() if r["station_id"] == sid)
+    assert row["gone"] is True
+    assert row["silent"] is True
+
+
+def test_self_is_never_silent_or_gone():
+    s = make_session()
+    me = next(r for r in s.roster() if r["is_self"])
+    assert me["silent"] is False
+    assert me["gone"] is False
+    assert me["silent_secs"] is None
+
+
 # --- chat ----------------------------------------------------------------- #
 def test_post_chat_records_and_notifies():
     s = make_session()

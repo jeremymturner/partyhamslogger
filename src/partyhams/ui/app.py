@@ -239,6 +239,8 @@ def run() -> int:
             window.set_qrz_credentials(state.qrz_username, state.qrz_password)
             window.on_change_auto_update = _change_auto_update
             window.set_auto_update(state.auto_update_enabled, state.auto_update_interval_hours)
+            window.on_change_cw_speed_mode = _change_cw_speed_mode
+            window.set_cw_speed_mode(state.cw_speed_mode)
             window.show()
             ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
             window.set_poller(ctx["poller"])
@@ -363,6 +365,10 @@ def run() -> int:
     def _change_auto_update(enabled: bool, interval_hours: int) -> None:
         state.auto_update_enabled = enabled
         state.auto_update_interval_hours = interval_hours
+        save_state(state)
+
+    def _change_cw_speed_mode(mode: str) -> None:
+        state.cw_speed_mode = mode
         save_state(state)
 
     # --- theme change (live) ---

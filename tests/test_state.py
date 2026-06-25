@@ -32,6 +32,13 @@ def test_theme_round_trip(tmp_path):
     assert load_state(path).theme == "Sand (warm)"
 
 
+def test_cw_speed_mode_round_trip(tmp_path):
+    path = tmp_path / "state.json"
+    assert load_state(path).cw_speed_mode == "sync"  # default
+    save_state(AppState(cw_speed_mode="restore"), path)
+    assert load_state(path).cw_speed_mode == "restore"
+
+
 def test_recent_logs_round_trip(tmp_path):
     path = tmp_path / "state.json"
     state = AppState()
