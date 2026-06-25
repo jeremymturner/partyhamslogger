@@ -152,6 +152,24 @@ def test_self_is_never_silent_or_gone():
     assert me["silent_secs"] is None
 
 
+def test_roster_includes_log_only_stations_when_not_live():
+    """A peer that logged QSOs but isn't currently broadcasting still appears in
+    the roster (with its last-known identity + stats), flagged offline."""
+    s = make_session()
+    # A foreign station's QSO lands in the log, but no live StationStatus arrived.
+    s.engine.log.apply(
+        make_qso("K1ABC", station_id="peerXYZ", operator="W7XYZ", station_callsign="W7XYZ")
+    )
+    assert not s.engine.stations  # no live presence for that station
+
+    peer = next((r for r in s.roster() if r["station_id"] == "peerXYZ"), None)
+    assert peer is not None
+    assert peer["operator"] == "W7XYZ"
+    assert peer["call"] == "W7XYZ"
+    assert peer["total"] == 1  # stats reconstructed from the log
+    assert peer["gone"] is True  # never heard live -> flagged offline (struck through)
+
+
 # --- chat ----------------------------------------------------------------- #
 def test_post_chat_records_and_notifies():
     s = make_session()

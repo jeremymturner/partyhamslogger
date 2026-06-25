@@ -164,6 +164,37 @@ async def test_set_operator_stamps_new_qsos_and_persists(tmp_path):
     assert open_session(db).operator == "W1XYZ"
 
 
+async def test_station_id_and_stats_persist_across_reopen(tmp_path):
+    db = tmp_path / "log.sqlite"
+    from partyhams.app.session import build_session, open_session
+
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W0CPH",
+        operator="N0AW",
+        sent_exchange={"class": "1E", "section": "OR"},
+        network=None,
+        db_path=db,
+    )
+    sid = s.engine.station_id
+    await s.log_qso(
+        call="K1ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1D", "section": "WY"}
+    )
+    await s.log_qso(
+        call="W2ABC", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1D", "section": "NM"}
+    )
+    self_row = next(r for r in s.roster() if r["is_self"])
+    assert self_row["total"] == 2
+    s.store.close()
+
+    # Reopen: same station identity (carried in the log), so the self row's stats
+    # don't reset to zero on restart.
+    s2 = open_session(db)
+    assert s2.engine.station_id == sid
+    self_row2 = next(r for r in s2.roster() if r["is_self"])
+    assert self_row2["total"] == 2
+
+
 async def test_set_operator_ignores_blank_and_noop():
     s = make_session()
     before = s.operator

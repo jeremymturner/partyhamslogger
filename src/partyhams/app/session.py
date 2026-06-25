@@ -202,7 +202,13 @@ class LogSession:
         }
 
     def roster(self) -> list[dict]:
-        """All known stations (self first), with operating state and QSO rates."""
+        """All known stations (self first), with operating state and QSO rates.
+
+        Live presence (``engine.stations``, from StationStatus broadcasts) is merged
+        with every station that has logged QSOs in the (persisted) log, so the panel
+        survives a restart: peers who logged but haven't re-announced yet appear with
+        their last-known identity + stats, flagged offline until they're heard again.
+        """
         now = utcnow()
         rows = [
             self._station_row(
@@ -221,9 +227,34 @@ class LogSession:
                 now=now,
             )
         ]
-        for sid, info in self.engine.stations.items():
+        # Identities from the log (last-known operator/call per station), so ops who
+        # logged earlier still show up. Live presence wins where both exist.
+        from_log = self._log_station_identities()
+        seen = {self.engine.station_id}
+        for sid in [*self.engine.stations, *from_log]:
+            if sid in seen:
+                continue
+            seen.add(sid)
+            info = self.engine.stations.get(sid) or from_log.get(sid, {})
             rows.append(self._station_row(sid, info, is_self=False, now=now))
         return rows
+
+    def _log_station_identities(self) -> dict[str, dict]:
+        """Map each station_id in the log to its last-known operator/call (by the
+        highest-lamport QSO), so a station that's logged QSOs has a roster identity
+        even when it isn't currently broadcasting presence."""
+        latest: dict[str, tuple[int, dict]] = {}
+        for qso in self.engine.log.qsos():
+            sid = qso.station_id
+            if not sid:
+                continue
+            prev = latest.get(sid)
+            if prev is None or qso.lamport >= prev[0]:
+                latest[sid] = (
+                    qso.lamport,
+                    {"operator": qso.operator, "call": qso.station_callsign},
+                )
+        return {sid: ident for sid, (_, ident) in latest.items()}
 
     def _station_row(self, sid: str, info: dict, is_self: bool, now) -> dict:
         last_heard = info.get("last_heard")
@@ -619,8 +650,8 @@ def _assemble(
     operator: str | None,
     network: str | None,
     store: SqliteLog,
+    station_id: str,
 ) -> LogSession:
-    station_id = new_station_id()
     if network:
         transport: NullTransport | MulticastTransport = MulticastTransport(network, station_id)
     else:
@@ -635,6 +666,7 @@ def _write_meta(
     config: ContestConfig,
     operator: str | None,
     network: str | None,
+    station_id: str,
 ) -> None:
     store.set_meta("contest_id", contest_id)
     store.set_meta("my_call", config.my_call)
@@ -642,6 +674,9 @@ def _write_meta(
     store.set_meta("network", network or "")
     store.set_meta("sent_exchange", json.dumps(config.sent_exchange))
     store.set_meta("extra", json.dumps(config.extra))
+    # Stable per-log station identity, so this machine keeps the same sync id (and
+    # its QSO stats) every time the log is reopened (see open_session).
+    store.set_meta("station_id", station_id)
 
 
 def build_session(
@@ -667,8 +702,9 @@ def build_session(
         merged_extra.update(extra)
     config = ContestConfig(my_call=my_call, sent_exchange=sent_exchange, extra=merged_extra)
     store = SqliteLog(db_path)
-    _write_meta(store, contest_id, config, operator, network)
-    return _assemble(contest, config, operator, network, store)
+    station_id = new_station_id()
+    _write_meta(store, contest_id, config, operator, network, station_id)
+    return _assemble(contest, config, operator, network, store, station_id)
 
 
 def summarize_log(path: str | Path) -> dict | None:
@@ -721,4 +757,10 @@ def open_session(db_path: str | Path) -> LogSession:
     )
     operator = meta.get("operator") or config.my_call
     network = meta.get("network") or None
-    return _assemble(contest, config, operator, network, store)
+    # Reuse the log's saved station id so stats carry across restarts. Logs created
+    # before this field existed get one generated and persisted now (stable hereafter).
+    station_id = meta.get("station_id")
+    if not station_id:
+        station_id = new_station_id()
+        store.set_meta("station_id", station_id)
+    return _assemble(contest, config, operator, network, store, station_id)
