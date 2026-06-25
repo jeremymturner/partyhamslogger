@@ -16,9 +16,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from partyhams.app.session import list_logs
+from partyhams.app.session import list_logs, log_detail
 
-_COLUMNS = ["Activity", "Call", "QSOs", "Modified"]
+_COLUMNS = ["Activity", "When / Where", "Call", "QSOs", "Modified"]
 
 
 class OpenLogDialog(QDialog):
@@ -37,12 +37,13 @@ class OpenLogDialog(QDialog):
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.horizontalHeader().setStretchLastSection(True)
         self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._table.setColumnWidth(0, 160)
-        self._table.setColumnWidth(1, 90)
-        self._table.setColumnWidth(2, 60)
+        self._table.setColumnWidth(0, 150)
+        self._table.setColumnWidth(1, 140)
+        self._table.setColumnWidth(2, 80)
+        self._table.setColumnWidth(3, 50)
         for row, log in enumerate(self._logs):
             modified = datetime.fromtimestamp(log["mtime"]).strftime("%Y-%m-%d %H:%M")
-            values = [log["contest"], log["call"], str(log["qsos"]), modified]
+            values = [log["contest"], log_detail(log), log["call"], str(log["qsos"]), modified]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setData(Qt.ItemDataRole.UserRole, log["path"])

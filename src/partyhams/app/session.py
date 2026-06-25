@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from partyhams.contest import get as get_contest
@@ -742,12 +742,16 @@ def build_session(
 
 
 def summarize_log(path: str | Path) -> dict | None:
-    """Summary of one log file (contest, call, QSO count, mtime), or None if unreadable."""
+    """Summary of one log file for the Open Log chooser, or None if unreadable.
+
+    Includes the distinguishing detail — the event date (first QSO) and, for POTA,
+    the park(s) — so logs of the same contest are uniquely identifiable (see
+    :func:`log_detail`)."""
     path = Path(path)
     try:
         store = SqliteLog(path)
         meta = store.all_meta()
-        qsos = len(store.all())
+        rows = store.all()
         store.close()
     except Exception:  # noqa: BLE001 - unreadable/foreign/missing file
         return None
@@ -756,13 +760,39 @@ def summarize_log(path: str | Path) -> dict | None:
         name = get_contest(contest_id).name
     except KeyError:
         name = contest_id or "?"
+    # Event date = first QSO's UTC date; fall back to the file's date for an empty
+    # log (≈ when it was created), so even unlogged events are still dated.
+    if rows:
+        start = rows[0].timestamp.date().isoformat()
+    else:
+        start = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).date().isoformat()
+    try:
+        extra = json.loads(meta.get("extra", "{}"))
+    except (ValueError, TypeError):
+        extra = {}
     return {
         "path": str(path),
         "contest": name,
+        "contest_id": contest_id,
         "call": meta.get("my_call", ""),
-        "qsos": qsos,
+        "qsos": len(rows),
         "mtime": path.stat().st_mtime,
+        "start": start,
+        "park": str(extra.get("park", "") or ""),
     }
+
+
+def log_detail(summary: dict) -> str:
+    """The distinguishing detail for a log summary: park(s) and/or event date, so
+    two logs of the same contest are easy to tell apart. POTA shows the park(s);
+    every log shows its event date."""
+    parts: list[str] = []
+    parks = [p.strip().upper() for p in summary.get("park", "").split(",") if p.strip()]
+    if parks:
+        parts.append(parks[0] if len(parks) == 1 else f"{parks[0]} +{len(parks) - 1}")
+    if summary.get("start"):
+        parts.append(summary["start"])
+    return " · ".join(parts)
 
 
 def list_logs(logs_dir: Path | None = None) -> list[dict]:

@@ -19,7 +19,13 @@ from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QApplication, QDialog
 
 from partyhams.app.radio import RadioPoller
-from partyhams.app.session import LogSession, build_session, open_session, summarize_log
+from partyhams.app.session import (
+    LogSession,
+    build_session,
+    log_detail,
+    open_session,
+    summarize_log,
+)
 from partyhams.app.state import AppState, load_state, new_log_path, push_recent, save_state
 from partyhams.radio.civ_protocol import CIV_ADDR_IC705, CIV_ADDR_IC7610
 from partyhams.radio.flex import FlexRadio
@@ -322,6 +328,9 @@ def run() -> int:
             label = summary["contest"]
             if summary["call"]:
                 label = f"{label} — {summary['call']}"
+            detail = log_detail(summary)
+            if detail:
+                label = f"{label} · {detail}"
             entries.append((path, label))
         return entries
 

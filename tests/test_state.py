@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from partyhams.app.session import build_session, open_session
 from partyhams.app.state import (
     MAX_RECENT_LOGS,
@@ -68,8 +70,22 @@ def test_load_state_tolerates_garbage(tmp_path):
 
 
 def test_new_log_path(tmp_path):
-    p = new_log_path("arrl-field-day", "W7/ABC", logs_dir=tmp_path)
-    assert p.endswith("arrl-field-day-W7_ABC.sqlite")
+    from datetime import date
+
+    when = date(2026, 6, 27)
+    p = new_log_path("arrl-field-day", "W7/ABC", logs_dir=tmp_path, when=when)
+    assert p.endswith("arrl-field-day-W7_ABC-20260627.sqlite")
+
+
+def test_new_log_path_is_unique_per_creation(tmp_path):
+    from datetime import date
+
+    when = date(2026, 6, 27)
+    p1 = new_log_path("arrl-field-day", "W7ABC", logs_dir=tmp_path, when=when)
+    Path(p1).write_text("")  # the first log now exists on disk
+    p2 = new_log_path("arrl-field-day", "W7ABC", logs_dir=tmp_path, when=when)
+    assert p1 != p2  # same contest/call/day -> a distinct path, not an overwrite
+    assert p2.endswith("arrl-field-day-W7ABC-20260627-2.sqlite")
 
 
 def test_log_file_is_self_describing(tmp_path):

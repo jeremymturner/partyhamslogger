@@ -436,6 +436,39 @@ async def test_list_logs_missing_dir_is_empty(tmp_path):
     assert list_logs(tmp_path / "nope") == []
 
 
+async def test_log_detail_distinguishes_by_park_and_date(tmp_path):
+    from partyhams.app.session import log_detail, summarize_log
+
+    # A POTA log: detail leads with the park, then the event (first-QSO) date.
+    pota = build_session(
+        contest_id="pota",
+        my_call="W7ABC",
+        sent_exchange={},
+        extra={"park": "US-4403,US-1234"},
+        network=None,
+        db_path=tmp_path / "pota.sqlite",
+    )
+    await pota.log_qso(call="K1A", freq_hz=FREQ_20M, mode=Mode.CW, exchange={})
+    detail = log_detail(summarize_log(tmp_path / "pota.sqlite"))
+    assert detail.startswith("US-4403 +1")  # first park + count of the rest
+    assert detail.count("-") >= 2 and detail.split(" · ")[-1][:4].isdigit()  # ends with a date
+
+    # A non-POTA log: detail is just the event date (no park).
+    fd = build_session(
+        contest_id="arrl-field-day",
+        my_call="N0AW",
+        sent_exchange={"class": "1E", "section": "OR"},
+        network=None,
+        db_path=tmp_path / "fd.sqlite",
+    )
+    await fd.log_qso(
+        call="K1A", freq_hz=FREQ_20M, mode=Mode.CW, exchange={"class": "1A", "section": "OR"}
+    )
+    fd_detail = log_detail(summarize_log(tmp_path / "fd.sqlite"))
+    assert "US-" not in fd_detail
+    assert fd_detail and fd_detail[:4].isdigit()  # a bare YYYY-MM-DD date
+
+
 async def test_reload_from_disk(tmp_path):
     db = tmp_path / "log.sqlite"
     s1 = make_session(db_path=db)
