@@ -64,6 +64,9 @@ def test_optional_exchange_park(pota):
     fields = pota.exchange_fields()
     assert [f.name for f in fields] == ["park"]
     assert fields[0].required is False
+    # The P2P park is received-only — not part of our sent exchange, so it must
+    # not appear on the log-setup screen (it'd read as "My Their park").
+    assert fields[0].sent is False
     # parse_exchange tolerates an empty (no-P2P) exchange because park is optional.
     assert pota.parse_exchange("") == {}
     assert pota.parse_exchange("US-5678") == {"park": "US-5678"}
@@ -162,6 +165,60 @@ def test_verify_park_parses_name():
     assert info["name"] == "Yellowstone NP"
     assert info["location"] == "US-WY"
     assert info["reference"] == "US-1234"
+
+
+def test_verify_park_returns_entity_and_locations():
+    sample = json.dumps(
+        {
+            "reference": "US-4567",
+            "name": "Great Smoky Mountains NP",
+            "locationDesc": "US-TN,US-NC",
+            "entityName": "United States Of America",
+            "grid6": "EM85xa",
+        }
+    )
+    info = verify_park("US-4567", fetch=lambda _u: sample)
+    assert info["entity"] == "United States Of America"
+    # A multi-state park yields each location code separately for selection.
+    assert info["locations"] == ["US-TN", "US-NC"]
+    assert info["grid"] == "EM85xa"
+
+
+def test_verify_park_full_name_appends_park_type():
+    # The full name is the bare name plus the park-type designation.
+    sample = json.dumps(
+        {"reference": "US-4403", "name": "Medicine Bow - Routt", "parktypeDesc": "National Forest"}
+    )
+    info = verify_park("US-4403", fetch=lambda _u: sample)
+    assert info["name"] == "Medicine Bow - Routt National Forest"
+
+    # Doesn't double up when the type is already part of the name.
+    sample2 = json.dumps(
+        {"reference": "US-1", "name": "Yellowstone National Park", "parktypeDesc": "National Park"}
+    )
+    info2 = verify_park("US-1", fetch=lambda _u: sample2)
+    assert info2["name"] == "Yellowstone National Park"
+
+
+def test_verify_park_us_4403_spans_colorado_and_wyoming():
+    # US-4403 straddles a state line: locationDesc lists both.
+    sample = json.dumps(
+        {
+            "reference": "US-4403",
+            "name": "Some Trail NST",
+            "locationDesc": "US-CO,US-WY",
+            "entityName": "United States Of America",
+        }
+    )
+    info = verify_park("US-4403", fetch=lambda _u: sample)
+    assert info["locations"] == ["US-CO", "US-WY"]
+    assert info["entity"] == "United States Of America"
+
+
+def test_verify_park_single_location_list():
+    sample = json.dumps({"reference": "US-1", "name": "P", "locationDesc": "US-WY"})
+    info = verify_park("US-1", fetch=lambda _u: sample)
+    assert info["locations"] == ["US-WY"]
 
 
 def test_verify_park_offline_returns_none():

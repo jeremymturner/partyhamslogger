@@ -76,7 +76,11 @@ class Pota(ContestDefinition):
         # The contacted station's park is optional and only present for
         # park-to-park (P2P) contacts; everything else is RST, handled by the core.
         return [
-            ExchangeField("park", "Their park (P2P)", required=False, validator=is_valid_park),
+            # Received-only (the other station's park on a P2P contact), never part
+            # of our sent exchange — so it's excluded from the log-setup screen.
+            ExchangeField(
+                "park", "P2P", required=False, validator=is_valid_park, sent=False
+            ),
         ]
 
     def allowed_bands(self) -> set[str]:
