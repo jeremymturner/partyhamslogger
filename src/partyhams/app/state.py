@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 APP_DIR = Path.home() / ".partyhams"
@@ -122,8 +123,21 @@ def push_recent(state: AppState, path: str) -> None:
     state.recent_logs = recent[:MAX_RECENT_LOGS]
 
 
-def new_log_path(contest_id: str, call: str, logs_dir: Path = LOGS_DIR) -> str:
-    """A default log-file path for a new event: ``<contest>-<call>.sqlite``."""
+def new_log_path(
+    contest_id: str, call: str, logs_dir: Path = LOGS_DIR, when: date | None = None
+) -> str:
+    """A unique default path for a new event: ``<contest>-<call>-<YYYYMMDD>.sqlite``.
+
+    The date keeps recurring events distinct (e.g. Field Day 2025 vs 2026), and a
+    ``-N`` suffix is appended if a log with that name already exists, so creating a
+    second log the same day never overwrites the first."""
     safe = re.sub(r"[^A-Za-z0-9]+", "_", call).strip("_") or "station"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    return str(logs_dir / f"{contest_id}-{safe}.sqlite")
+    day = (when or date.today()).strftime("%Y%m%d")
+    base = f"{contest_id}-{safe}-{day}"
+    candidate = logs_dir / f"{base}.sqlite"
+    n = 2
+    while candidate.exists():
+        candidate = logs_dir / f"{base}-{n}.sqlite"
+        n += 1
+    return str(candidate)
