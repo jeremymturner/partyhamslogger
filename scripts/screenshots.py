@@ -36,7 +36,8 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from partyhams.app.macros import load_macros  # noqa: E402
 from partyhams.app.session import LogSession, build_session  # noqa: E402
-from partyhams.core.models import Mode, utcnow  # noqa: E402
+from partyhams.core.clock import new_uuid  # noqa: E402
+from partyhams.core.models import QSO, Mode, utcnow  # noqa: E402
 from partyhams.ui import style  # noqa: E402
 from partyhams.ui.about_dialog import AboutDialog  # noqa: E402
 from partyhams.ui.autoexport_dialog import AutoExportDialog  # noqa: E402
@@ -58,7 +59,7 @@ _SAMPLE_QSOS = [
     ("K1ABC", 14_040_000, Mode.CW, {"class": "2A", "section": "EMA"}),
     ("W2XYZ", 14_250_000, Mode.USB, {"class": "1D", "section": "NLI"}),
     ("N5DEF", 7_030_000, Mode.CW, {"class": "3A", "section": "STX"}),
-    ("VE3GHI", 21_300_000, Mode.USB, {"class": "2A", "section": "ONE"}),
+    ("W3GHI", 21_300_000, Mode.USB, {"class": "2A", "section": "EPA"}),
     ("KH6JKL", 3_540_000, Mode.CW, {"class": "1B", "section": "PAC"}),
     ("W7MNO", 14_060_000, Mode.CW, {"class": "4A", "section": "WWA"}),
     ("K9PQR", 21_350_000, Mode.USB, {"class": "2A", "section": "IL"}),
@@ -98,6 +99,24 @@ def _save(widget: QWidget, name: str, width: int, height: int) -> Path:
     return out
 
 
+def _save_hero(win: MainWindow, name: str, width: int, height: int, dock_width: int) -> Path:
+    """Like _save, but widens the docked network panel so the roster text isn't
+    truncated in the hero capture."""
+    from PySide6.QtCore import Qt
+
+    win.resize(width, height)
+    win.show()
+    QApplication.processEvents()
+    dock = getattr(win, "_network_dock", None)
+    if dock is not None:
+        win.resizeDocks([dock], [dock_width], Qt.Orientation.Horizontal)
+        QApplication.processEvents()
+    out = SHOTS_DIR / f"{name}.png"
+    win.grab().save(str(out))
+    win.hide()
+    return out
+
+
 # --- per-screen builders --------------------------------------------------- #
 # Each returns the widget so tests can construct them headlessly and assert
 # a non-null QWidget without needing to write a file.
@@ -105,6 +124,137 @@ def _save(widget: QWidget, name: str, width: int, height: int) -> Path:
 
 def build_main_window(session: LogSession) -> MainWindow:
     return MainWindow(session)
+
+
+# Networked peers for the hero shots: (station_id, operator, station_call, freq, mode).
+_FD_PEERS = [
+    ("peer-ab", "AB1QRP", "K2RDX", 7_028_000, Mode.CW),
+    ("peer-n0", "N0AW", "W0CPH", 14_255_000, Mode.USB),
+    ("peer-w3", "W3GHI", "W3GHI", 21_025_000, Mode.CW),
+]
+_POTA_PEERS = [
+    ("peer-kd", "KD2ABC", "KD2ABC", 7_032_000, Mode.CW),
+    ("peer-ko", "KO4XYZ", "KO4XYZ", 14_062_000, Mode.CW),
+]
+
+
+# Valid US callsign building blocks. One-letter prefixes are K/N/W; two-letter
+# prefixes start with A/K/N/W (an "A" prefix only pairs with A-L).
+_ONE_PREFIXES = ("K", "N", "W")
+_TWO_PREFIXES = (
+    "AB", "AC", "AD", "AE", "AG", "AK", "KC", "KD",
+    "KE", "KG", "NA", "NB", "ND", "WA", "WB", "WX",
+)
+_CALL_FORMATS = ("1x3", "1x2", "2x1", "2x2", "2x3")
+
+
+def _us_callsign(n: int) -> str:
+    """A valid US amateur callsign for index ``n``, cycling the common formats —
+    1x3, 1x2, 2x1, 2x2, 2x3 — i.e. a one- or two-letter prefix, a single
+    call-district digit, and a 1-3 letter suffix. Deterministic and unique for
+    the small counts used in these sample logs."""
+    fmt = _CALL_FORMATS[n % len(_CALL_FORMATS)]
+    pre_len, suf_len = int(fmt[0]), int(fmt[2])
+    digit = (n // len(_CALL_FORMATS)) % 10
+    if pre_len == 1:
+        prefix = _ONE_PREFIXES[n % len(_ONE_PREFIXES)]
+    else:
+        prefix = _TWO_PREFIXES[n % len(_TWO_PREFIXES)]
+    suffix = "".join(chr(65 + (n * (k + 3) + 7 * k) % 26) for k in range(suf_len))
+    return f"{prefix}{digit}{suffix}"
+
+
+def _add_network_peers(session: LogSession, peers, exchange: dict[str, str]) -> None:
+    """Inject live peer presence plus a few of each peer's QSOs, so the roster shows
+    several stations with real rates/totals and the log shows peer-colored rows."""
+    eng = session.engine
+    now = utcnow()
+    worked_n = 0
+    for i, (sid, op, call, freq, mode) in enumerate(peers):
+        eng.stations[sid] = {
+            "operator": op,
+            "call": call,
+            "freq_hz": freq,
+            "mode": mode.value,
+            "power_w": 100.0,
+            "swr": 1.2,
+            "ft_tx_even": -1,
+            "last_heard": now,
+        }
+        for j in range(3 + i):
+            worked = _us_callsign(worked_n)  # valid US call, format varies
+            worked_n += 1
+            eng.log.apply(
+                QSO(
+                    uuid=new_uuid(),
+                    station_id=sid,
+                    operator=op,
+                    station_callsign=call,
+                    lamport=eng.clock.tick(),
+                    call=worked,
+                    freq_hz=freq,
+                    mode=mode,
+                    timestamp=now - timedelta(minutes=2 * j + i),
+                    rst_sent="599",
+                    rst_rcvd="599",
+                    exchange_rcvd=dict(exchange),
+                )
+            )
+
+
+def build_hero() -> MainWindow:
+    """Field Day hero: the main window with a populated log and a few networked
+    peers, showing off the multi-station roster + chat alongside the log."""
+    session = make_sample_session()
+    _add_network_peers(session, _FD_PEERS, {"class": "2A", "section": "WWA"})
+    session.post_chat("*", "Run rate is climbing on 20m — nice work everyone!")
+    win = MainWindow(session)
+    win._panel.refresh_roster()
+    win.refresh()
+    return win
+
+
+_POTA_QSOS = [
+    ("K1ABC", 14_062_000, Mode.CW, {}),
+    ("W2XYZ", 14_285_000, Mode.USB, {}),
+    ("N5DEF", 7_032_000, Mode.CW, {}),
+    ("W3GHI", 14_061_000, Mode.CW, {"park": "US-1234"}),  # park-to-park
+    ("KH6JKL", 21_030_000, Mode.CW, {}),
+    ("W7MNO", 14_063_000, Mode.CW, {}),
+    ("K9PQR", 14_286_000, Mode.USB, {}),
+    ("AC2DEF", 10_110_000, Mode.CW, {"park": "US-5678"}),  # park-to-park
+]
+
+
+def build_pota_hero() -> MainWindow:
+    """POTA hero: an activation with the park station line, a populated log
+    (a couple of park-to-park contacts), and networked peers."""
+    session = build_session(
+        contest_id="pota",
+        my_call="W7PH",
+        operator="W7PH",
+        sent_exchange={},
+        power="low_150w",
+        network="pota-us-4403",
+        extra={
+            "park": "US-4403",
+            "entity": "United States Of America",
+            "location": "US-WY",
+            "park_names": {"US-4403": "Medicine Bow - Routt National Forest"},
+        },
+    )
+    session.set_local_status(14_062_000, Mode.CW)
+    now = utcnow()
+    for i, (call, freq, mode, exch) in enumerate(_POTA_QSOS):
+        qso = session.record_qso(call=call, freq_hz=freq, mode=mode, exchange=exch)
+        qso.timestamp = now - timedelta(minutes=3 * (len(_POTA_QSOS) - i))
+    _add_network_peers(session, _POTA_PEERS, {})
+    session.post_chat("*", "US-4403 activated — 20m CW is wide open!")
+    session.post_chat("*", "P2P with US-1234, thanks for the contact 73")
+    win = MainWindow(session)
+    win._panel.refresh_roster()
+    win.refresh()
+    return win
 
 
 def build_network_panel(session: LogSession) -> NetworkPanel:
@@ -189,6 +339,11 @@ def generate_all() -> list[Path]:
 
     win = build_main_window(session)
     written.append(_save(win, "main-window", 1060, 580))
+
+    # README heroes: main window + networked peers, with the network dock widened
+    # so the roster text shows in full. One for Field Day, one for POTA.
+    written.append(_save_hero(build_hero(), "hero", 1320, 680, dock_width=380))
+    written.append(_save_hero(build_pota_hero(), "hero-pota", 1320, 680, dock_width=380))
 
     written.append(_save(build_network_panel(session), "network-panel", 360, 560))
     written.append(_save(build_sections_window(session), "sections", 960, 560))

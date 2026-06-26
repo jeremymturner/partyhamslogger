@@ -706,6 +706,7 @@ class MainWindow(QMainWindow):
         self._panel.on_request_sync = self._request_full_log
         dock = QDockWidget("Network", self)
         dock.setObjectName("networkDock")
+        self._network_dock = dock
         dock.setWidget(self._panel)
         dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea

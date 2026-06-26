@@ -3,6 +3,14 @@
 A cross-platform, multi-station amateur radio **contest logger** — N1MM-class
 capability, dramatically easier to set up, configure, and operate.
 
+![ARRL Field Day in PartyHams Logger — keyboard-first entry, a populated log, and a live multi-station network roster with chat](docs/screenshots/hero.png)
+
+*ARRL Field Day — keyboard-first logging with a live multi-station roster and chat.*
+
+![A Parks on the Air activation in PartyHams Logger — the park name and location on the station line, with park-to-park contacts in the log](docs/screenshots/hero-pota.png)
+
+*Parks on the Air — the park name + location ride the station line, with park-to-park (P2P) contacts logged inline.*
+
 Built with **Python 3.12 + Qt6 (PySide6)**. Runs on macOS, Windows, and Linux.
 
 > 🚧 **Pre-alpha.** Scaffolding stage. See [IDEAS.md](IDEAS.md) for the full design
