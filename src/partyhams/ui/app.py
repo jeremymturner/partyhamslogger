@@ -13,11 +13,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
+import time
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject
+from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtWidgets import QApplication, QDialog
 
+from partyhams.app.locks import (
+    acquire_log_lock,
+    is_log_in_use,
+    refresh_log_lock,
+    release_log_lock,
+)
 from partyhams.app.radio import RadioPoller
 from partyhams.app.session import (
     LogSession,
@@ -152,20 +159,28 @@ def _remember_log(state: AppState, path: str) -> None:
     save_state(state)
 
 
-def _open_or_create_log(state: AppState) -> LogSession | None:
-    """Reopen the remembered log, or run the creation screen. None if cancelled."""
-    if state.current_log and Path(state.current_log).exists():
+def _open_or_create_log(state: AppState) -> tuple[LogSession | None, bool]:
+    """Reopen the remembered log, or run the creation screen.
+
+    Returns ``(session, forced_setup)``. ``forced_setup`` is True when we deliberately
+    sent the user through setup because the remembered log is already open in another
+    instance on this machine — so this launch picks a *different* log (its own
+    station identity) and re-verifies the radio. ``session`` is None if cancelled.
+    """
+    remembered = state.current_log
+    in_use = bool(remembered) and is_log_in_use(remembered, now=time.time())
+    if remembered and Path(remembered).exists() and not in_use:
         with contextlib.suppress(Exception):
-            session = open_session(state.current_log)  # fall through if corrupt/old
-            _remember_log(state, state.current_log)
-            return session
+            session = open_session(remembered)  # fall through if corrupt/old
+            _remember_log(state, remembered)
+            return session, False
 
     dialog = LogDialog()
     if dialog.exec() != QDialog.DialogCode.Accepted:
-        return None
+        return None, in_use
     session, db_path = _session_from_log_dialog(dialog.settings())
     _remember_log(state, db_path)
-    return session
+    return session, in_use
 
 
 async def _start_poller(poller: RadioPoller | None, window: MainWindow) -> RadioPoller | None:
@@ -195,13 +210,14 @@ def run() -> int:
     state = load_state()
     apply_theme(app, state.theme)  # saved theme, or the OS-matching default
     apply_font(app, state.font_family, state.font_size)  # saved base font
-    session = _open_or_create_log(state)
+    session, forced_setup = _open_or_create_log(state)
     if session is None:
         return 0
 
-    # Prompt for a radio only if the choice hasn't been made yet.
-    if state.radio is None:
-        rdlg = RadioDialog()
+    # Prompt for a radio if none is set, or always re-verify it for a second
+    # instance forced through setup (it may be on a different rig/band).
+    if state.radio is None or forced_setup:
+        rdlg = RadioDialog(current=state.radio)
         if rdlg.exec() == QDialog.DialogCode.Accepted:
             state.radio = rdlg.settings()
             save_state(state)
@@ -234,10 +250,22 @@ def run() -> int:
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             break
 
+    def _active_log_path() -> str:
+        s = ctx["session"]
+        return getattr(s.store, "path", "") if s is not None else ""
+
+    # Heartbeat the active log's lock so other instances can tell we're alive
+    # (and reclaim the lock if we crash). See app/locks.py.
+    lock_timer = QTimer()
+    lock_timer.setInterval(60_000)
+    lock_timer.timeout.connect(lambda: refresh_log_lock(_active_log_path(), now=time.time()))
+    lock_timer.start()
+
     async def amain() -> None:
         while ctx["session"] is not None:
             active = ctx["session"]
             await active.start()
+            acquire_log_lock(_active_log_path(), now=time.time())
             window = MainWindow(active, on_close=close_event.set)
             window.on_change_radio = lambda w=window: _request_radio_change(w)
             window.on_new_log = lambda w=window: _new_log_flow(w)
@@ -273,6 +301,7 @@ def run() -> int:
                 await ctx["poller"].stop()
                 ctx["poller"] = None
             await window.stop_wsjtx()
+            release_log_lock(_active_log_path())  # let other instances reuse this log
             await active.stop()
             window._on_close = None  # don't re-fire close_event during teardown
             if window._sections_window is not None:

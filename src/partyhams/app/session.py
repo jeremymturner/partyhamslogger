@@ -668,8 +668,13 @@ class LogSession:
     # ------------------------------------------------------------------ #
     # export
     # ------------------------------------------------------------------ #
-    def export_adif(self) -> str:
-        return write_adif(self.engine.log.qsos(), self.config, self.contest)
+    def export_adif(self, *, mine_only: bool = False) -> str:
+        """Render the log as ADIF. ``mine_only`` keeps just this station's own QSOs
+        (by station_id) — for a personal submission — vs the whole synced log."""
+        qsos = self.engine.log.qsos()
+        if mine_only:
+            qsos = [q for q in qsos if q.station_id == self.engine.station_id]
+        return write_adif(qsos, self.config, self.contest)
 
     def export_cabrillo(self) -> str:
         operators = {q.operator for q in self.engine.log.qsos()}

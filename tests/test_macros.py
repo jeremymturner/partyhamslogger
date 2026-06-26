@@ -78,16 +78,19 @@ def test_load_defaults_and_round_trip(tmp_path):
     # No file yet -> contest defaults.
     ms = load_macros(contest, macros_dir=tmp_path)
     assert ms.cw_wpm == DEFAULT_WPM
+    assert ms.cw_kbd_wpm == DEFAULT_WPM
     assert ms.get("CW.RUN", 1).content == "CQ FD {MYCALL} {MYCALL} FD"
 
     # Customize + save, then reload from the per-contest file.
     ms.cw_wpm = 32
+    ms.cw_kbd_wpm = 18  # the separate keyboard speed round-trips too
     ms.get("CW.RUN", 1).content = "CQ TEST {MYCALL}"
     save_macros(contest.id, ms, macros_dir=tmp_path)
     assert (tmp_path / "arrl-field-day.json").exists()
 
     reloaded = load_macros(contest, macros_dir=tmp_path)
     assert reloaded.cw_wpm == 32
+    assert reloaded.cw_kbd_wpm == 18
     assert reloaded.get("CW.RUN", 1).content == "CQ TEST {MYCALL}"
 
 

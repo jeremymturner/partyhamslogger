@@ -1,15 +1,18 @@
 """ContestBot: a pure, deterministic "banter" engine for the network chat.
 
 Given a snapshot of per-station activity (plus the previous snapshot), it decides
-whether to post a fun, ham-radio-flavoured automated message — cheering a station
-whose rate is climbing, gently ribbing one that's gone quiet, or just dropping the
-occasional terrible pun. It is intentionally Qt-free, randomness-free, and
+what fun, ham-radio-flavoured automated message to post — cheering a station whose
+rate is climbing, gently ribbing one that's gone quiet, dropping one of a hundred
+terrible puns, or (on Field Day, near the top of the hour) nudging a station about
+the WWV "power hour". It is intentionally Qt-free, randomness-free, and
 wall-clock-free: every decision is a pure function of its inputs (the caller passes
-a monotonically increasing ``counter`` to drive deterministic selection), so the
-whole thing is trivially unit-testable.
+a monotonically increasing ``counter`` and, for time-aware bits, the current
+minute), so the whole thing is trivially unit-testable.
 
-The UI layer (main window) is responsible for building the snapshots on a timer,
-throttling, and posting whatever string this returns to the chat.
+The UI layer (main window) builds the snapshots on a timer, **throttles** posts to
+roughly one every :data:`BANTER_COOLDOWN_MIN` minutes (so the bot isn't noisy),
+and posts whatever string this returns to the chat. Because there are 100 puns and
+posts are ~20 minutes apart, a given line won't recur for many hours.
 """
 
 from __future__ import annotations
@@ -29,8 +32,11 @@ SLACKING_AGE_MIN = 20.0
 #: (so we don't pick on someone who simply hasn't started yet).
 SLACKING_MIN_TOTAL = 1
 
-#: Drop a generic pun every Nth check when nothing else is noteworthy.
-PUN_EVERY = 5
+#: How often (minutes) the UI should let the bot speak — keeps it un-spammy.
+BANTER_COOLDOWN_MIN = 20
+
+#: Minutes past the hour for the Field Day "WWV power hour" nudge.
+WWV_MINUTE = 50
 
 
 @dataclass(frozen=True)
@@ -71,7 +77,17 @@ SLACKING = (
     "{op}, your rate dropped to QRP-zero. Crank the wick and work somebody!",
 )
 
-# Generic puns dropped occasionally when nothing else is going on.
+# Field Day "WWV power hour" nudge near the top of the hour. ``{op}`` => operator.
+WWV_POWER_HOUR = (
+    "{op}, the WWV power hour is almost upon us — warm up that filter and key up at the top!",
+    "Heads up {op}: WWV power hour at the top of the hour. Mark your watches!",
+    "{op}, are you ready for the WWV power hour? Synchronize your dits!",
+    "Ten to the hour, {op} — ready for the WWV power hour? Last one to 599 buys the coffee.",
+    "{op}, WWV power hour incoming. Set your clock, steel your nerves, run that rate!",
+    "Calling {op} — ready for the WWV power hour? The ionosphere waits for no one.",
+)
+
+# A hundred generic, ham-flavoured one-liners dropped when nothing else is up.
 PUNS = (
     "Two antennas got married. The wedding was meh, but the reception was excellent. 73!",
     "I'd tell you a UDP joke, but you might not get it. So here's a ham one instead.",
@@ -88,6 +104,91 @@ PUNS = (
     "Propagation tip: a positive attitude has excellent gain in every direction. 73!",
     "If at first you don't succeed, QSY and try again. The bands are forgiving.",
     "Stay tuned, stay matched, and may your SWR be ever in your favour.",
+    "I told my antenna a joke. It didn't laugh, but the reception was great.",
+    "Why do hams never get lost? They always know their grid square.",
+    "My coax is so old it remembers spark gap.",
+    "I'm reading a book on helium — impossible to put down, unlike my mic in a pileup.",
+    "CW operators do it with rhythm. Dit dit.",
+    "SSB: where everyone sounds like they're talking through a sock. Lovely sock, though.",
+    "The band's so quiet you can hear the electrons sulking.",
+    "My SWR is 1:1 and so is my excitement. Perfectly matched.",
+    "Worked all states? I've barely worked all the rooms in my house.",
+    "Field Day forecast: 100% chance of bug spray and dropped contacts.",
+    "I put up a new dipole. The neighbours put up with it. Teamwork!",
+    "Why did the QSO go to therapy? Too many unresolved exchanges.",
+    "Roses are red, violets are blue, my RST is 599 and so are you.",
+    "The only thing spreading faster than the band opening is the coffee at the op table.",
+    "I don't always work DX, but when I do, the band closes immediately.",
+    "My logbook has more entries than my diary. Priorities, people.",
+    "Solar flux up, attitude up, dupes down. That's the dream.",
+    "A wise elmer once said: it's not the watts, it's how you wiggle them.",
+    "The bands are a buffet — load up while the propagation's hot.",
+    "I asked my rig for a contact. It said 'QRZ?' Rude, but fair.",
+    "Grounding: because nobody likes a shocking surprise.",
+    "They say silence is golden. On 20 meters it's just nobody answering your CQ.",
+    "My antenna analyzer and I have trust issues.",
+    "CQ contest at 3 a.m.? Yes, I'm aware. The points don't sleep.",
+    "A handheld walks into a bar. Bartender: 'we don't serve spurious emissions.'",
+    "Why bring string to a contest? To work some long-wire DX.",
+    "Logging tip: the QSO you didn't log never happened. Spooky.",
+    "The S-meter pegged. So did my grin.",
+    "Propagation is the universe deciding whether you get to have fun today.",
+    "I've got 99 problems but a pitch ain't one — perfect zero beat.",
+    "Dead band? No such thing. Just a band practising mindfulness.",
+    "My favourite exchange: 'you're 59' — even when you're clearly not.",
+    "Antenna height: the one number hams will happily exaggerate.",
+    "Coffee, coax, and CQ — the three C's of a good Field Day.",
+    "I worked a station so weak even the noise floor felt sorry for him.",
+    "Tuning up across the band: a crime in some countries, a hobby in mine.",
+    "The RF gods demand a sacrifice. I offer this slightly-too-long patch cable.",
+    "Nothing humbles you like a 5-watt station outrunning your kilowatt.",
+    "My handheld has more memory channels than I have friends. We don't discuss it.",
+    "SWR 3:1? That's not a fault, that's a personality.",
+    "The band opened, the pileup roared, and my dog left the room. Worth it.",
+    "Why be normal when you can be resonant?",
+    "A good operator listens twice and transmits once.",
+    "The DX is always weaker on the other side of the QSB.",
+    "I named my amplifier 'Bias' — it always runs a little hot.",
+    "The early ham catches the gray line.",
+    "Ragchew: the original podcast, just with more static.",
+    "My antenna fell down. I'm calling it a temporary NVIS experiment.",
+    "Smoke test passed: no smoke. Bar was on the floor; we cleared it.",
+    "They told me to ground my station. Now it won't stop talking about being centered.",
+    "73 is just 'best wishes' with better SWR.",
+    "I keep my keyer fast and my coffee faster.",
+    "When in doubt, blame the feedline. It's usually right.",
+    "The bands don't care about your excuses, but they respect a good antenna.",
+    "Worked split for the first time. Felt like a wizard. Was just confused.",
+    "My ATU is the bravest little box I own.",
+    "CQ DX, CQ DX — and the only reply is my own echo off the ionosphere.",
+    "A pileup is just enthusiastic chaos with callsigns.",
+    "I don't need a gym; I have a tower to climb and a rotor that's stuck.",
+    "The most powerful mode is enthusiasm. Closely followed by FT8, sadly.",
+    "Static crashes: nature's way of saying 'talk louder.'",
+    "My bureau card arrived — took longer than the contact's marriage.",
+    "The band's hot, the rate's climbing, and a neighbour's TV just gave up.",
+    "Patience is a virtue; on a DX pileup it's a survival skill.",
+    "I told my exchange to the void and the void came back 59 001.",
+    "A balanced antenna is a happy antenna. Be like the antenna.",
+    "The rig hummed, the band buzzed, and the magic smoke stayed put. Victory.",
+    "Some chase points; I chase that one perfect S9 report.",
+    "My logbook says I'm popular. My logbook is a generous liar.",
+    "Six meters: dead for months, then suddenly Italy. Classic six.",
+    "I'd explain SWR but it would just reflect badly on me.",
+    "The contest never ends; it just QSYs to next weekend.",
+    "Keep your dits short and your friendships long.",
+    "A watt saved is a watt earned, said no contester ever.",
+    "The antenna farm is the only farm where you harvest decibels.",
+    "I worked the world from my backyard. The world has no idea where my backyard is.",
+    "CW is just texting for people with great timing.",
+    "The ionosphere is moody, but she always comes around at gray line.",
+    "My rig has 1000 menus. I use three. We coexist.",
+    "Nothing says 'I love this hobby' like soldering at midnight.",
+    "The best DX is the friend you ragchew along the way.",
+    "Crank the antenna, not the ego. The band rewards humility.",
+    "My new vertical radiates in all directions — mostly toward the neighbour's complaints.",
+    "Worked a DXpedition on the first call. I'm framing this moment, not the QSL.",
+    "May your noise be low, your DX be loud, and your coffee never empty. 73!",
 )
 
 
@@ -100,24 +201,33 @@ def choose_message(
     snapshot: list[StationSnapshot],
     previous: list[StationSnapshot] | None,
     counter: int,
+    *,
+    minute_of_hour: int | None = None,
+    field_day: bool = False,
 ) -> str | None:
-    """Decide whether ContestBot should say something, and return it (or ``None``).
+    """Decide what ContestBot should say, and return it (or ``None``).
 
-    Pure and deterministic. Priority: cheer a station heating up, then rib a quiet
-    one, then (every :data:`PUN_EVERY` checks) drop a generic pun. ``counter`` is a
-    caller-supplied, monotonically increasing integer used both as the periodic
-    trigger and to rotate deterministically through each message pool.
+    Pure and deterministic. Priority: the Field Day WWV power-hour nudge (near the
+    top of the hour), then cheer a station heating up, then rib a quiet one, then
+    fall back to a generic pun. Returns ``None`` only when there's no named station
+    to talk to. Throttling (how *often* this is acted on) is the caller's job — see
+    :data:`BANTER_COOLDOWN_MIN`.
 
-    The returned string is already prefixed with the bot name, e.g.
-    ``"ContestBot: …"`` so the existing chat format is untouched.
+    ``counter`` rotates deterministically through each pool. ``minute_of_hour`` and
+    ``field_day`` drive the WWV nudge. The returned string is already prefixed with
+    the bot name, e.g. ``"ContestBot: …"``.
     """
+    named = [s for s in snapshot if s.operator]
     prev_by_op = {s.operator: s for s in (previous or [])}
 
-    # (a) Heating up — biggest 15-minute rate jump since last check wins.
+    # (a) Field Day: near the top of the hour, nudge a station about WWV.
+    if field_day and minute_of_hour == WWV_MINUTE and named:
+        op = named[counter % len(named)].operator
+        return _say(_pick(WWV_POWER_HOUR, counter).format(op=op))
+
+    # (b) Heating up — biggest 15-minute rate jump since last check wins.
     best_op, best_delta = None, 0
-    for s in snapshot:
-        if not s.operator:
-            continue
+    for s in named:
         before = prev_by_op.get(s.operator)
         if before is None:
             continue
@@ -127,10 +237,10 @@ def choose_message(
     if best_op is not None:
         return _say(_pick(HEATING_UP, counter).format(op=best_op))
 
-    # (b) Slacking — the station idle the longest (past the threshold) wins.
+    # (c) Slacking — the station idle the longest (past the threshold) wins.
     idle_op, idle_age = None, SLACKING_AGE_MIN
-    for s in snapshot:
-        if not s.operator or s.total < SLACKING_MIN_TOTAL:
+    for s in named:
+        if s.total < SLACKING_MIN_TOTAL:
             continue
         age = s.last_qso_age_min
         if age is not None and age >= idle_age:
@@ -138,11 +248,9 @@ def choose_message(
     if idle_op is not None:
         return _say(_pick(SLACKING, counter).format(op=idle_op))
 
-    # (c) Occasional generic pun — only every PUN_EVERY checks, to stay un-spammy,
-    # and only when at least one real (named) station is around to enjoy it.
-    if counter % PUN_EVERY == 0 and any(s.operator for s in snapshot):
+    # (d) Generic pun — the fallback whenever there's someone around to enjoy it.
+    if named:
         return _say(_pick(PUNS, counter))
-
     return None
 
 

@@ -51,6 +51,25 @@ async def make_logged_session():
     return s
 
 
+async def test_adif_mine_only_filters_to_this_station():
+    from dataclasses import replace
+
+    s = await make_logged_session()  # two QSOs logged here (this station)
+    mine = s.qsos()[0]
+    # A peer's QSO syncs into the log under a different station_id.
+    peer = replace(mine, uuid="peer-1", call="DX1ABC", station_id="peerXYZ", lamport=999)
+    s.engine.log.apply(peer)
+
+    all_adif = s.export_adif()  # everyone
+    assert all_adif.count("<EOR>") == 3
+    assert "DX1ABC" in all_adif
+
+    my_adif = s.export_adif(mine_only=True)  # just this station
+    assert my_adif.count("<EOR>") == 2
+    assert "DX1ABC" not in my_adif
+    assert "K1ABC" in my_adif
+
+
 async def test_adif_structure():
     s = await make_logged_session()
     adif = s.export_adif()

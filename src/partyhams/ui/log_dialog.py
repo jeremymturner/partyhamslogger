@@ -70,7 +70,7 @@ class LogDialog(QDialog):
         top.addRow("Activity", self._contest)
         top.addRow("Station call", self._call)
         top.addRow("Operator", self._operator)
-        top.addRow("Network name", self._network)
+        top.addRow("Activity name", self._network)
         outer.addLayout(top)
 
         # Contest-specific fields (exchange + config) live in their own form so we
@@ -108,8 +108,8 @@ class LogDialog(QDialog):
         self._call.setText(existing.get("my_call", ""))
         self._operator.setText(existing.get("operator", ""))
         self._network.setText(existing.get("network", ""))
-        self._network.setEnabled(False)  # sync network is fixed at creation
-        self._network.setToolTip("The network is set when the log is created")
+        self._network.setEnabled(False)  # the sync activity name is fixed at creation
+        self._network.setToolTip("The activity name is set when the log is created")
         self._rebuild_contest_fields()
         self._prefill_contest_fields(existing)
 

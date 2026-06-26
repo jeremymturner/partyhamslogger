@@ -29,19 +29,21 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from partyhams.app.banter import StationSnapshot, choose_message
+from partyhams.app.banter import BANTER_COOLDOWN_MIN, StationSnapshot, choose_message
 from partyhams.app.macros import (
     CW_SPEED_LABELS,
     CW_SPEED_MODES,
     CW_SPEED_RESTORE,
     CW_SPEED_SYNC,
-    CW_WPM_PRESETS,
+    WPM_MAX,
+    WPM_MIN,
     bank_key,
     clamp_wpm,
     cw_duration_seconds,
@@ -225,6 +227,9 @@ class MainWindow(QMainWindow):
         # and the pending restore task (cancelled/rescheduled across rapid sends).
         self._cw_restore_wpm: int | None = None
         self._cw_restore_task: asyncio.Task | None = None
+        # Last keyer speed we commanded the rig (macro or keyboard send / push), so
+        # Sync mode doesn't re-adopt our own echo as an operator knob change.
+        self._last_commanded_wpm: int | None = None
         #: Set by the app: on_autocq_interval(secs) persists the chosen interval.
         self.on_autocq_interval: Callable[[int], None] | None = None
         # Periodic ADIF auto-export settings (driven from app state).
@@ -721,9 +726,13 @@ class MainWindow(QMainWindow):
         self._roster_timer.timeout.connect(self._panel.refresh_roster)
         self._roster_timer.start()
 
-        # ContestBot: occasionally drop a fun automated message into the chat.
+        # ContestBot: drop a fun automated message into the chat, but no more than
+        # once every ~20 minutes so it stays un-spammy. The timer ticks each minute
+        # (to track rate deltas and catch the Field Day :50 WWV window); posting is
+        # gated by the cooldown. Seed the cooldown to "now" for a quiet startup.
         self._banter_prev: list[StationSnapshot] | None = None
         self._banter_counter = 0
+        self._banter_last = utcnow()
         self._banter_timer = QTimer(self)
         self._banter_timer.setInterval(60_000)  # once a minute
         self._banter_timer.timeout.connect(self._banter_tick)
@@ -753,13 +762,26 @@ class MainWindow(QMainWindow):
         return snaps
 
     def _banter_tick(self) -> None:
-        """Once a minute: maybe post a ContestBot message visible to everyone."""
+        """Once a minute: track activity, and at most every ~20 minutes post a
+        ContestBot message visible to everyone."""
+        now = utcnow()
         snapshot = self._banter_snapshot()
+        prev = self._banter_prev
+        self._banter_prev = snapshot  # always advance, so rate deltas stay fresh
         self._banter_counter += 1
-        message = choose_message(snapshot, self._banter_prev, self._banter_counter)
-        self._banter_prev = snapshot
+        if (now - self._banter_last).total_seconds() < BANTER_COOLDOWN_MIN * 60:
+            return  # still cooling down — keep quiet
+        field_day = self.session.contest.id == "arrl-field-day"
+        message = choose_message(
+            snapshot,
+            prev,
+            self._banter_counter,
+            minute_of_hour=now.minute,
+            field_day=field_day,
+        )
         if message:
             self._send_chat("*", message)  # local echo + broadcast to all peers
+            self._banter_last = now
 
     def _request_full_log(self) -> None:
         if self._loop is not None and self._loop.is_running():
@@ -864,30 +886,30 @@ class MainWindow(QMainWindow):
     # CW speed bar (issue #4): quick WPM presets + a live keyboard sender
     # ------------------------------------------------------------------ #
     def _build_cw_bar(self) -> QWidget:
-        """Below the F-key bar: quick CW-speed presets, the current WPM, and a live
-        keyboard sender. Up/Down (from the entry or keyboard fields) nudge the speed
-        by 1 WPM; the keyboard field sends each character as it's typed and Enter
-        clears it. Only shown in CW mode (see _update_bottom_bars)."""
+        """Below the F-key bar: a CW-speed box and a live keyboard sender. The speed
+        is a spin box showing the current WPM with up/down stepper arrows; the
+        keyboard Up/Down arrows nudge it too (from the entry or keyboard fields, or
+        the box itself). The keyboard field sends each character as it's typed and
+        Enter clears it. Only shown in CW mode (see _update_bottom_bars)."""
         bar = QWidget()
         hbox = QHBoxLayout(bar)
         hbox.setContentsMargins(2, 2, 2, 2)
         hbox.setSpacing(3)
 
         hbox.addWidget(QLabel("CW"))
-        self._wpm_buttons: dict[int, QPushButton] = {}
-        for wpm in CW_WPM_PRESETS:
-            btn = QPushButton(f"{wpm}")
-            btn.setObjectName("fkey")
-            btn.setMinimumHeight(32)
-            btn.setFixedWidth(48)
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # keep focus in the entry fields
-            btn.clicked.connect(lambda _checked=False, w=wpm: self._set_wpm(w))
-            self._wpm_buttons[wpm] = btn
-            hbox.addWidget(btn)
-
-        self._wpm_label = QLabel()
-        self._wpm_label.setMinimumWidth(64)
-        hbox.addWidget(self._wpm_label)
+        self._wpm_spin = QSpinBox()
+        self._wpm_spin.setRange(WPM_MIN, WPM_MAX)
+        self._wpm_spin.setValue(self._macros.cw_wpm)
+        self._wpm_spin.setSuffix(" WPM")
+        self._wpm_spin.setAccelerated(True)  # hold an arrow to ramp the value
+        self._wpm_spin.setMinimumHeight(32)
+        self._wpm_spin.setFixedWidth(92)
+        # ClickFocus so Tab keeps cycling the QSO entry fields, but a click lets the
+        # operator type a value or use the box's own arrows.
+        self._wpm_spin.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._wpm_spin.setToolTip("CW speed for macros / F-keys")
+        self._wpm_spin.valueChanged.connect(self._on_wpm_spin_changed)
+        hbox.addWidget(self._wpm_spin)
 
         # Live CW keyboard: sends as you type, Enter clears. Kept out of
         # _entry_fields so Space/Tab/Enter behave as text + clear (not field nav).
@@ -896,8 +918,23 @@ class MainWindow(QMainWindow):
         self._cw_keyboard.setPlaceholderText("Type to send CW…  (Enter clears)")
         self._cw_keyboard.textEdited.connect(self._on_cw_keyboard_edited)
         self._cw_keyboard.returnPressed.connect(self._clear_cw_keyboard)
-        self._cw_keyboard.installEventFilter(self)  # Up/Down -> change WPM
+        self._cw_keyboard.installEventFilter(self)  # Up/Down -> change keyboard WPM
         hbox.addWidget(self._cw_keyboard, stretch=1)
+
+        # A separate speed used only for the live keyboard sender above, so you can
+        # type freehand slower than your macros run.
+        hbox.addWidget(QLabel("Kbd"))
+        self._kbd_wpm_spin = QSpinBox()
+        self._kbd_wpm_spin.setRange(WPM_MIN, WPM_MAX)
+        self._kbd_wpm_spin.setValue(self._macros.cw_kbd_wpm)
+        self._kbd_wpm_spin.setSuffix(" WPM")
+        self._kbd_wpm_spin.setAccelerated(True)
+        self._kbd_wpm_spin.setMinimumHeight(32)
+        self._kbd_wpm_spin.setFixedWidth(92)
+        self._kbd_wpm_spin.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._kbd_wpm_spin.setToolTip("CW speed for the live keyboard sender")
+        self._kbd_wpm_spin.valueChanged.connect(self._on_kbd_wpm_spin_changed)
+        hbox.addWidget(self._kbd_wpm_spin)
         return bar
 
     def _set_wpm(self, wpm: int, *, source: str = "user") -> None:
@@ -920,6 +957,29 @@ class MainWindow(QMainWindow):
 
     def _bump_wpm(self, delta: int) -> None:
         self._set_wpm(self._macros.cw_wpm + delta)
+
+    def _on_wpm_spin_changed(self, value: int) -> None:
+        """The macro WPM spin box (typed value or its up/down arrows) changed."""
+        self._set_wpm(value)
+
+    def _set_kbd_wpm(self, wpm: int) -> None:
+        """Set the live-keyboard CW speed (separate from the macro speed) and persist
+        it. Applied only to characters typed in the keyboard sender."""
+        wpm = clamp_wpm(wpm)
+        if wpm == self._macros.cw_kbd_wpm:
+            self._update_cw_bar()
+            return
+        self._macros.cw_kbd_wpm = wpm
+        save_macros(self.session.contest.id, self._macros)
+        self._update_cw_bar()
+        self.statusBar().showMessage(f"Keyboard CW speed {wpm} WPM", 1500)
+
+    def _bump_kbd_wpm(self, delta: int) -> None:
+        self._set_kbd_wpm(self._macros.cw_kbd_wpm + delta)
+
+    def _on_kbd_wpm_spin_changed(self, value: int) -> None:
+        """The keyboard WPM spin box changed."""
+        self._set_kbd_wpm(value)
 
     # --- CW keyer-speed ownership modes (Radio menu) --- #
     def _build_cw_speed_menu(self, radio_menu) -> None:
@@ -972,26 +1032,27 @@ class MainWindow(QMainWindow):
     async def _do_set_wpm(self, radio, wpm: int) -> None:
         try:
             await radio.set_wpm(wpm)
+            self._last_commanded_wpm = wpm  # so Sync doesn't re-adopt our own change
         except Exception as exc:  # noqa: BLE001 - never crash on a keyer-speed push
             self.statusBar().showMessage(f"Set radio WPM failed: {exc}", 3000)
 
     def _update_cw_bar(self) -> None:
-        wpm = self._macros.cw_wpm
-        self._wpm_label.setText(f"{wpm} WPM")
-        # Outline the preset matching the current speed (if any).
-        for preset, btn in self._wpm_buttons.items():
-            btn.setStyleSheet(
-                f"QPushButton#fkey {{ border: 2px solid {style.MULT}; }}"
-                if preset == wpm
-                else ""
-            )
+        # Reflect both speeds in their boxes without re-triggering valueChanged.
+        for spin, value in (
+            (self._wpm_spin, self._macros.cw_wpm),
+            (self._kbd_wpm_spin, self._macros.cw_kbd_wpm),
+        ):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
 
     def _on_cw_keyboard_edited(self, text: str) -> None:
         """Send only the characters newly appended since the last edit, so live
         typing streams to the keyer one chunk at a time. A deletion or mid-line
-        edit can't be un-sent — it just resyncs the tracker, no send."""
+        edit can't be un-sent — it just resyncs the tracker, no send. Sent at the
+        separate keyboard speed (``cw_kbd_wpm``), not the macro speed."""
         if text.startswith(self._cw_kbd_sent) and len(text) > len(self._cw_kbd_sent):
-            self._send_cw(text[len(self._cw_kbd_sent) :].upper())
+            self._send_cw(text[len(self._cw_kbd_sent) :].upper(), wpm=self._macros.cw_kbd_wpm)
         self._cw_kbd_sent = text
 
     def _clear_cw_keyboard(self) -> None:
@@ -1100,16 +1161,18 @@ class MainWindow(QMainWindow):
             if key in (Qt.Key.Key_Space, Qt.Key.Key_Tab):
                 self._advance_entry_field(obj, +1)
                 return True
-        # Up/Down nudge the CW speed from the entry fields or the live CW keyboard
-        # (single-line edits don't use vertical arrows, so nothing is shadowed).
-        if event.type() == QEvent.Type.KeyPress and (
-            obj in self._entry_fields or obj is self._cw_keyboard
-        ):
-            if event.key() == Qt.Key.Key_Up:
-                self._bump_wpm(+1)
+        # Up/Down nudge a CW speed (single-line edits don't use vertical arrows, so
+        # nothing is shadowed). In the entry fields it's the macro speed; in the live
+        # CW keyboard it's that field's own keyboard speed.
+        if event.type() == QEvent.Type.KeyPress:
+            delta = (
+                +1 if event.key() == Qt.Key.Key_Up else -1 if event.key() == Qt.Key.Key_Down else 0
+            )
+            if delta and obj in self._entry_fields:
+                self._bump_wpm(delta)
                 return True
-            if event.key() == Qt.Key.Key_Down:
-                self._bump_wpm(-1)
+            if delta and obj is self._cw_keyboard:
+                self._bump_kbd_wpm(delta)
                 return True
         return super().eventFilter(obj, event)
 
@@ -1122,29 +1185,34 @@ class MainWindow(QMainWindow):
             target.setFocus()
             target.selectAll()
 
-    def _send_cw(self, text: str, tx_desc: tuple[int, str, str] | None = None) -> None:
+    def _send_cw(
+        self, text: str, tx_desc: tuple[int, str, str] | None = None, *, wpm: int | None = None
+    ) -> None:
         radio = self._poller.radio if self._poller is not None else None
         if radio is None or not radio.supports(Capability.SEND_CW):
             self.statusBar().showMessage("No CW keyer — configure a radio", 3000)
             return
+        wpm = self._macros.cw_wpm if wpm is None else wpm
         if tx_desc is not None:
             self._show_tx_status("TRANSMITTING", tx_desc, timeout=0)
         if self._loop is not None and self._loop.is_running():
-            self._loop.create_task(self._do_send_cw(radio, text, tx_desc))
+            self._loop.create_task(self._do_send_cw(radio, text, tx_desc, wpm))
 
     async def _do_send_cw(
-        self, radio, text: str, tx_desc: tuple[int, str, str] | None = None
+        self, radio, text: str, tx_desc: tuple[int, str, str] | None = None, wpm: int | None = None
     ) -> None:
+        wpm = self._macros.cw_wpm if wpm is None else wpm
         try:
             restore = self._cw_speed_mode == CW_SPEED_RESTORE and radio.supports(
                 Capability.KEYER_SPEED
             )
             if restore:
-                await self._send_cw_then_restore(radio, text)
+                await self._send_cw_then_restore(radio, text, wpm)
             else:
-                # Always / Sync: assert the logger's speed on the way out. (In Sync
-                # the rig already matches, so this is just a harmless re-assert.)
-                await radio.send_cw(text, wpm=self._macros.cw_wpm)
+                # Always / Sync: assert the requested speed on the way out. Remember
+                # it so Sync's follow-the-rig poll doesn't re-adopt our own echo.
+                await radio.send_cw(text, wpm=wpm)
+                self._last_commanded_wpm = wpm
             if tx_desc is not None:
                 self._show_tx_status("SENT", tx_desc, timeout=5000)
             else:
@@ -1152,24 +1220,24 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 - surface keyer errors, don't crash
             self.statusBar().showMessage(f"CW failed: {exc}", 4000)
 
-    async def _send_cw_then_restore(self, radio, text: str) -> None:
-        """Restore mode: remember the rig's own speed, key at the logger's speed,
-        then schedule a restore to the rig's speed once keying should be done."""
+    async def _send_cw_then_restore(self, radio, text: str, wpm: int) -> None:
+        """Restore mode: remember the rig's own speed, key at ``wpm``, then schedule
+        a restore to the rig's speed once keying should be done."""
         if self._cw_restore_wpm is None:  # first send of a burst: capture the knob
             try:
                 self._cw_restore_wpm = await radio.read_wpm()
             except Exception:  # noqa: BLE001 - if we can't read it, we can't restore
                 self._cw_restore_wpm = None
-        await radio.send_cw(text, wpm=self._macros.cw_wpm)
-        self._schedule_cw_restore(radio, text)
+        await radio.send_cw(text, wpm=wpm)
+        self._schedule_cw_restore(radio, text, wpm)
 
-    def _schedule_cw_restore(self, radio, text: str) -> None:
+    def _schedule_cw_restore(self, radio, text: str, wpm: int) -> None:
         if self._cw_restore_wpm is None or self._loop is None or not self._loop.is_running():
             return
         if self._cw_restore_task is not None:
             self._cw_restore_task.cancel()  # a newer send supersedes the pending restore
         # Pad the estimate: restoring late is harmless, early would change speed mid-CW.
-        delay = cw_duration_seconds(text, self._macros.cw_wpm) * 1.2 + 0.5
+        delay = cw_duration_seconds(text, wpm) * 1.2 + 0.5
         self._cw_restore_task = self._loop.create_task(self._restore_cw_after(radio, delay))
 
     async def _restore_cw_after(self, radio, delay: float) -> None:
@@ -1300,8 +1368,16 @@ class MainWindow(QMainWindow):
         set_op.setShortcut(QKeySequence(sc.SET_OPERATOR))
         set_op.setStatusTip("Set who is at the key — stamps new QSOs and colors the log")
         logs_menu.addSeparator()
-        adif = logs_menu.addAction("Export ADIF…", self._export_adif)
-        adif.setShortcut(QKeySequence(sc.EXPORT_ADIF))
+        adif_menu = logs_menu.addMenu("Export ADIF")
+        adif_all = adif_menu.addAction(
+            "All stations…", lambda: self._export_adif(mine_only=False)
+        )
+        adif_all.setShortcut(QKeySequence(sc.EXPORT_ADIF))
+        adif_all.setStatusTip("Every QSO in this activity (the whole synced log)")
+        adif_mine = adif_menu.addAction(
+            "My QSOs only…", lambda: self._export_adif(mine_only=True)
+        )
+        adif_mine.setStatusTip("Only the QSOs this station logged — for a personal submission")
         cabrillo = logs_menu.addAction("Export Cabrillo…", self._export_cabrillo)
         cabrillo.setShortcut(QKeySequence(sc.EXPORT_CABRILLO))
         logs_menu.addAction("Auto-export…", self._edit_autoexport)
@@ -2114,10 +2190,13 @@ class MainWindow(QMainWindow):
 
     def _maybe_follow_radio_wpm(self, state: RadioState) -> None:
         """Sync mode: adopt a keyer-speed change made on the radio into the logger
-        (without echoing it back). A pending Restore-mode capture is ignored — the
-        rig is at the logger's speed mid-burst, not the operator's chosen speed."""
+        (without echoing it back). Ignore a reading that just reflects a speed we
+        ourselves commanded (e.g. a keyboard send at the separate keyboard speed),
+        so our own sends don't get re-adopted as the macro speed."""
         if self._cw_speed_mode != CW_SPEED_SYNC or state.wpm is None:
             return
+        if state.wpm == self._last_commanded_wpm:
+            return  # our own echo, not an operator knob change
         if state.wpm != self._macros.cw_wpm:
             self._set_wpm(state.wpm, source="radio")
 
@@ -2426,18 +2505,30 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # export
     # ------------------------------------------------------------------ #
-    def _export_adif(self) -> None:
-        suggested = self._default_adif_path()
+    def _export_adif(self, *, mine_only: bool) -> None:
+        label = "my QSOs" if mine_only else "all stations"
+        suggested = self._default_adif_path(mine_only=mine_only)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export ADIF", suggested, "ADIF (*.adi *.adif)"
+            self, f"Export ADIF — {label}", suggested, "ADIF (*.adi *.adif)"
         )
-        if path:
-            Path(path).write_text(self.session.export_adif())
-            self.statusBar().showMessage(f"Exported ADIF to {path}", 4000)
+        if not path:
+            return
+        Path(path).write_text(self.session.export_adif(mine_only=mine_only))
+        n = self._exported_qso_count(mine_only)
+        self.statusBar().showMessage(f"Exported {n} QSOs ({label}) to {path}", 4000)
 
-    def _default_adif_path(self) -> str:
+    def _exported_qso_count(self, mine_only: bool) -> int:
+        qsos = self.session.qsos()
+        if mine_only:
+            sid = self.session.engine.station_id
+            return sum(1 for q in qsos if q.station_id == sid)
+        return len(qsos)
+
+    def _default_adif_path(self, *, mine_only: bool = True) -> str:
         """Suggested export path: ``CALL@PARK_YYYYMMDD.adif`` in the log's folder
-        (``@`` swapped for ``_`` on a filesystem that can't store it)."""
+        (``@`` swapped for ``_`` on a filesystem that can't store it). The
+        all-stations export gets a ``-all`` suffix so it doesn't overwrite the
+        personal one."""
         log_path = getattr(self.session.store, "path", "")
         out_dir = Path(log_path).resolve().parent if log_path and log_path != ":memory:" else None
         call = self.session.config.my_call
@@ -2445,6 +2536,8 @@ class MainWindow(QMainWindow):
         # don't belong in filenames and the full list is inside the ADIF anyway.
         park = str(self.session.config.extra.get("park", "") or "").split(",")[0].strip()
         name = park_adif_name(call, park, utcnow(), at_sign=_fs_supports_at_sign(out_dir))
+        if not mine_only and name.endswith(".adif"):
+            name = f"{name[:-len('.adif')]}-all.adif"
         return str(out_dir / name) if out_dir is not None else name
 
     def _export_cabrillo(self) -> None:
