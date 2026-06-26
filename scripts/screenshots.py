@@ -283,12 +283,23 @@ def build_wsjtx_panel() -> WsjtxPanel:
         tx_period_odd=False,
         sending="W7PH K1ABC -07",
     )
-    for line in (
-        "0001  -7  0.2 1623 ~  CQ K1ABC FN42",
-        "0001 -12  0.1 1840 ~  W7PH N5DEF EM10",
-        "0002  -3  0.3 1124 ~  CQ DX VE3GHI FN03",
-    ):
-        panel.add_decode(line)
+    # Stations calling us: (call, section, pota). Several so they fill two rows;
+    # a Field Day section rides under each call and a green POTA activator shows
+    # the park-to-park highlight.
+    panel.set_callers(
+        [
+            ("K1ABC", "EMA", False),
+            ("N5DEF", "STX", False),
+            ("W2XYZ", "", True),
+            ("KH6JKL", "PAC", False),
+            ("AB1QRP", "CT", False),
+            ("KD2ABC", "", True),
+            ("W4GH", "VA", False),
+            ("N6PQ", "SDG", False),
+            ("AC2DEF", "WNY", False),
+            ("KO4XYZ", "GA", False),
+        ]
+    )
     return panel
 
 

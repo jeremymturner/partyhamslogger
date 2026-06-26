@@ -64,6 +64,7 @@ from partyhams.app.update import (
     is_asset_url,
     is_frozen,
 )
+from partyhams.contest.sections import is_valid_section
 from partyhams.core.models import (
     QSO,
     Band,
@@ -88,6 +89,7 @@ from partyhams.ui.sections_window import SectionsWindow
 from partyhams.ui.shortcuts import ShortcutsDialog
 from partyhams.ui.widgets import make_upper
 from partyhams.ui.wsjtx_panel import WsjtxPanel
+from partyhams.wsjtx.callers import CallerTracker
 from partyhams.wsjtx.convert import (
     map_mode,
     parse_tx_power,
@@ -282,6 +284,15 @@ class MainWindow(QMainWindow):
         self._wsjtx_mode: Mode | None = None
         self._wsjtx_id = ""  # the reporting WSJT-X instance id (for replies)
         self._wsjtx_highlighted: set[str] = set()  # calls we've already colored
+        # Live "callers" panel: who is calling us in FT8/FT4. Field Day tracks the
+        # section they send; POTA tints park activators green. Buttons expire after
+        # the tracker's TTL (~5 min); a timer prunes them even without new decodes.
+        self._callers = CallerTracker(
+            is_section=(is_valid_section if session.contest.id == "arrl-field-day" else None)
+        )
+        self._callers_timer = QTimer(self)
+        self._callers_timer.setInterval(20_000)
+        self._callers_timer.timeout.connect(self._refresh_callers)
         #: Set by the app: on_change_wsjtx(enabled, port, host) persists the choice.
         self.on_change_wsjtx: Callable[[bool, int, str], None] | None = None
         try:
@@ -329,6 +340,7 @@ class MainWindow(QMainWindow):
         self._cw_bar = self._build_cw_bar()
         layout.addWidget(self._cw_bar)
         self._wsjtx_panel = WsjtxPanel()
+        self._wsjtx_panel.on_call = self._reply_to_caller
         self._wsjtx_panel.setVisible(False)
         layout.addWidget(self._wsjtx_panel)
         self.setCentralWidget(root)
@@ -1624,6 +1636,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"WSJT-X log error: {exc}", 4000)
             return
         self._broadcast(qso)
+        # We've worked them — drop their caller button.
+        if self._callers.remove(msg.dx_call):
+            self._refresh_callers()
         # If WSJT-X reported the transmit power, share it so peers see our power.
         power_w = parse_tx_power(msg.tx_power)
         if power_w is not None:
@@ -1671,11 +1686,32 @@ class MainWindow(QMainWindow):
         )
 
     def _on_wsjtx_decode(self, decode: Decode) -> None:
-        """Show a decode line and highlight calls whose section we still need."""
+        """Track stations calling us (for the caller buttons) and highlight CQ
+        candidates whose section we still need."""
+        self._callers.ingest(decode, my_call=self.session.config.my_call, now=utcnow().timestamp())
         if self._wsjtx_active:
-            snr = f"{decode.snr:+d}" if isinstance(decode.snr, int) else str(decode.snr)
-            self._wsjtx_panel.add_decode(f"{snr:>4} dB  {decode.message}")
+            self._refresh_callers()
         self._maybe_highlight(decode)
+
+    def _refresh_callers(self) -> None:
+        """Repaint the caller buttons from the tracker (also expires stale ones)."""
+        now = utcnow().timestamp()
+        self._callers.prune(now)
+        self._wsjtx_panel.set_callers(
+            [(c.call, c.section, c.pota) for c in self._callers.active(now)]
+        )
+
+    def _reply_to_caller(self, call: str) -> None:
+        """A caller button was clicked: ask WSJT-X to answer that station."""
+        decode = self._callers.decode_for(call)
+        listener = self._wsjtx_listener
+        if decode is None or listener is None:
+            self.statusBar().showMessage(f"Can't answer {call} — WSJT-X not connected", 3000)
+            return
+        if listener.send_reply(self._wsjtx_id, decode):
+            self.statusBar().showMessage(f"Answering {call} via WSJT-X…", 2500)
+        else:
+            self.statusBar().showMessage(f"Couldn't send reply to {call}", 3000)
 
     @staticmethod
     def _map_status_mode(mode: str) -> Mode:
@@ -1687,8 +1723,13 @@ class MainWindow(QMainWindow):
             return
         self._wsjtx_active = active
         self._update_bottom_bars()
-        if not active:
-            self._wsjtx_panel.clear_decodes()
+        if active:
+            self._refresh_callers()
+            self._callers_timer.start()
+        else:
+            self._callers_timer.stop()
+            self._callers.clear()
+            self._wsjtx_panel.clear_callers()
             self._tx_period.setText("")  # no EVEN/ODD when WSJT-X isn't driving
 
     def _update_bottom_bars(self) -> None:

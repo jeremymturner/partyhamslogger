@@ -40,6 +40,7 @@ TYPE_HEARTBEAT = 0
 TYPE_STATUS = 1
 TYPE_DECODE = 2
 TYPE_CLEAR = 3
+TYPE_REPLY = 4
 TYPE_QSO_LOGGED = 5
 TYPE_HIGHLIGHT_CALLSIGN = 13
 
@@ -353,6 +354,18 @@ class _Writer:
         self._parts.append(struct.pack(">I", value & 0xFFFFFFFF))
         return self
 
+    def u8(self, value: int) -> _Writer:
+        self._parts.append(struct.pack(">B", value & 0xFF))
+        return self
+
+    def i32(self, value: int) -> _Writer:
+        self._parts.append(struct.pack(">i", value))
+        return self
+
+    def f64(self, value: float) -> _Writer:
+        self._parts.append(struct.pack(">d", value))
+        return self
+
     def boolean(self, value: bool) -> _Writer:
         self._parts.append(b"\x01" if value else b"\x00")
         return self
@@ -412,4 +425,33 @@ def encode_highlight_callsign(
     w.qcolor(background)
     w.qcolor(foreground)
     w.boolean(highlight_last)
+    return w.getvalue()
+
+
+def encode_reply(
+    id: str,
+    decode: Decode,
+    *,
+    low_confidence: bool = False,
+    modifiers: int = 0,
+    schema: int = 2,
+) -> bytes:
+    """Build a ``Reply`` (type 4) datagram that asks WSJT-X to answer ``decode``.
+
+    It echoes the decode's time/snr/offset/message back — the UDP equivalent of
+    double-clicking that line in WSJT-X, so WSJT-X starts calling that station.
+    ``modifiers`` mirrors keyboard modifiers (0 = none). Unverified against live
+    WSJT-X hardware. Returns the bytes to ``sendto`` WSJT-X.
+    """
+    w = _Writer()
+    w.u32(MAGIC).u32(schema).u32(TYPE_REPLY)
+    w.utf8(id)
+    w.u32(decode.time_ms)
+    w.i32(decode.snr)
+    w.f64(decode.delta_time)
+    w.u32(decode.delta_freq)
+    w.utf8(decode.mode)
+    w.utf8(decode.message)
+    w.boolean(low_confidence)
+    w.u8(modifiers)
     return w.getvalue()
