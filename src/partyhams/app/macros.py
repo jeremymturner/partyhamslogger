@@ -22,10 +22,9 @@ from partyhams.contest.base import ContestDefinition, Macro
 MACROS_DIR = APP_DIR / "macros"
 DEFAULT_WPM = 28
 
-# CW keyer speed bounds + the quick-set presets shown on the CW speed bar.
+# CW keyer speed bounds (WPM).
 WPM_MIN = 5
 WPM_MAX = 60
-CW_WPM_PRESETS: tuple[int, ...] = (18, 20, 24, 28, 30)
 
 # Who owns the CW keyer speed when a radio is connected (see the Radio menu):
 #   RESTORE — the logger sets its speed while keying, then restores the radio's
@@ -142,7 +141,8 @@ def esm_step(run: bool, call_present: bool, esm_sent: bool, exch_complete: bool)
 
 @dataclass
 class MacroSet:
-    cw_wpm: int = DEFAULT_WPM
+    cw_wpm: int = DEFAULT_WPM  # macro / F-key sending speed
+    cw_kbd_wpm: int = DEFAULT_WPM  # speed for the live keyboard CW sender
     groups: dict[str, list[Macro]] = field(default_factory=dict)
 
     def get(self, group: str, key: int) -> Macro | None:
@@ -153,7 +153,9 @@ class MacroSet:
 
     @classmethod
     def from_defaults(cls, contest: ContestDefinition) -> MacroSet:
-        return cls(cw_wpm=DEFAULT_WPM, groups=contest.default_macros())
+        return cls(
+            cw_wpm=DEFAULT_WPM, cw_kbd_wpm=DEFAULT_WPM, groups=contest.default_macros()
+        )
 
 
 def _macros_path(contest_id: str, macros_dir: Path = MACROS_DIR) -> Path:
@@ -173,13 +175,17 @@ def load_macros(contest: ContestDefinition, macros_dir: Path = MACROS_DIR) -> Ma
     }
     if not groups:
         groups = contest.default_macros()
-    return MacroSet(cw_wpm=int(data.get("cw_wpm", DEFAULT_WPM)), groups=groups)
+    cw_wpm = int(data.get("cw_wpm", DEFAULT_WPM))
+    # Older logs have no keyboard speed — default it to the macro speed.
+    cw_kbd_wpm = int(data.get("cw_kbd_wpm", cw_wpm))
+    return MacroSet(cw_wpm=cw_wpm, cw_kbd_wpm=cw_kbd_wpm, groups=groups)
 
 
 def save_macros(contest_id: str, macro_set: MacroSet, macros_dir: Path = MACROS_DIR) -> None:
     macros_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "cw_wpm": macro_set.cw_wpm,
+        "cw_kbd_wpm": macro_set.cw_kbd_wpm,
         "groups": {
             group: [{"key": m.key, "label": m.label, "content": m.content} for m in macros]
             for group, macros in macro_set.groups.items()

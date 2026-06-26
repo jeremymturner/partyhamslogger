@@ -584,22 +584,31 @@ def test_cw_bar_visible_only_in_cw_mode():
     assert w._cw_bar.isHidden()  # phone -> hidden (no CW speed there)
 
 
-def test_set_wpm_updates_label_persists_and_highlights(monkeypatch):
+def test_set_wpm_updates_spinbox_and_persists(monkeypatch):
     saved = []
     monkeypatch.setattr(
         "partyhams.ui.main_window.save_macros", lambda cid, ms, *a, **k: saved.append(ms.cw_wpm)
     )
-    from partyhams.ui import style
-
     w = _window()
     w._macros.cw_wpm = 18  # known starting point (independent of any saved macros)
     w._set_wpm(24)
     assert w._macros.cw_wpm == 24
     assert saved == [24]  # persisted with the event's macros
-    assert w._wpm_label.text() == "24 WPM"
-    # The matching preset is outlined; others are not.
-    assert style.MULT in w._wpm_buttons[24].styleSheet()
-    assert w._wpm_buttons[28].styleSheet() == ""
+    assert w._wpm_spin.value() == 24  # the box reflects the current speed
+
+
+def test_wpm_spinbox_change_sets_speed_without_feedback_loop(monkeypatch):
+    saved = []
+    monkeypatch.setattr(
+        "partyhams.ui.main_window.save_macros", lambda cid, ms, *a, **k: saved.append(ms.cw_wpm)
+    )
+    w = _window()
+    w._macros.cw_wpm = 18
+    w._update_cw_bar()  # box now shows 18
+    # Driving the spin box (typed value or its up/down arrows) sets the speed once.
+    w._wpm_spin.setValue(26)
+    assert w._macros.cw_wpm == 26
+    assert saved == [26]  # exactly one persist — no setValue/valueChanged loop
 
 
 def test_set_wpm_clamps_to_range(monkeypatch):
@@ -622,17 +631,22 @@ def test_up_down_arrows_change_wpm_from_entry_and_keyboard(monkeypatch):
 
     w = _window()
     w._macros.cw_wpm = 20
+    w._macros.cw_kbd_wpm = 15
 
     def press(widget, key):
         ev = QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
         return w.eventFilter(widget, ev)
 
-    # Up from the call field bumps +1 and consumes the key.
+    # Up from the call field bumps the MACRO speed and consumes the key.
     assert press(w._call, Qt.Key.Key_Up) is True
     assert w._macros.cw_wpm == 21
-    # Down from the live CW keyboard nudges -1.
+    assert w._macros.cw_kbd_wpm == 15  # keyboard speed untouched
+    # Up/Down from the live CW keyboard nudges the separate KEYBOARD speed.
     assert press(w._cw_keyboard, Qt.Key.Key_Down) is True
-    assert w._macros.cw_wpm == 20
+    assert w._macros.cw_kbd_wpm == 14
+    assert w._macros.cw_wpm == 21  # macro speed untouched
+    assert press(w._cw_keyboard, Qt.Key.Key_Up) is True
+    assert w._macros.cw_kbd_wpm == 15
 
 
 def test_cw_keyboard_streams_appended_chars_and_enter_clears():
@@ -824,7 +838,7 @@ async def test_restore_mode_keys_at_logger_speed_then_restores():
     w.set_cw_speed_mode("restore")
     radio = _FakeKeyerRadio(wpm=18)  # the operator's speed on the rig
 
-    await w._send_cw_then_restore(radio, "CQ TEST")
+    await w._send_cw_then_restore(radio, "CQ TEST", 30)
     # Captured the rig's own speed and keyed at the logger's speed.
     assert w._cw_restore_wpm == 18
     assert radio.sent == [("CQ TEST", 30)]
@@ -842,9 +856,9 @@ async def test_restore_mode_overlapping_sends_keep_original_speed():
     w.set_cw_speed_mode("restore")
     radio = _FakeKeyerRadio(wpm=18)
 
-    await w._send_cw_then_restore(radio, "CQ")
+    await w._send_cw_then_restore(radio, "CQ", 30)
     # A second send before the restore fires must not re-capture (rig is at 30 now).
-    await w._send_cw_then_restore(radio, "TEST")
+    await w._send_cw_then_restore(radio, "TEST", 30)
     assert w._cw_restore_wpm == 18  # still the original knob speed, not 30
 
     await w._restore_cw_after(radio, 0)
@@ -857,6 +871,44 @@ async def test_do_set_wpm_pushes_to_radio():
     await w._do_set_wpm(radio, 33)
     assert radio.set_calls == [33]
     assert radio._wpm == 33
+
+
+async def test_keyboard_send_uses_separate_keyboard_speed(monkeypatch):
+    monkeypatch.setattr("partyhams.ui.main_window.save_macros", lambda *a, **k: None)
+    w = _window()
+    w.set_cw_speed_mode("always")
+    w._macros.cw_wpm = 30  # macro speed
+    w._macros.cw_kbd_wpm = 15  # separate keyboard speed
+    radio = _FakeKeyerRadio(wpm=30)
+    # A keyboard send keys at the keyboard speed, not the macro speed.
+    await w._do_send_cw(radio, "K", None, w._macros.cw_kbd_wpm)
+    assert radio.sent == [("K", 15)]
+    assert w._last_commanded_wpm == 15
+
+
+def test_kbd_wpm_spin_changes_only_keyboard_speed(monkeypatch):
+    monkeypatch.setattr("partyhams.ui.main_window.save_macros", lambda *a, **k: None)
+    w = _window()
+    w._macros.cw_wpm = 28
+    w._update_cw_bar()
+    w._kbd_wpm_spin.setValue(16)
+    assert w._macros.cw_kbd_wpm == 16
+    assert w._macros.cw_wpm == 28  # macro speed unaffected
+
+
+def test_sync_ignores_our_own_send_echo():
+    from partyhams.app.radio import RadioState
+
+    w = _window()
+    w.set_cw_speed_mode("sync")
+    w._macros.cw_wpm = 30
+    # We just keyed at 15 (a keyboard send) -> the rig reads 15, but that's our echo.
+    w._last_commanded_wpm = 15
+    w._maybe_follow_radio_wpm(RadioState(freq_hz=14_040_000, mode=Mode.CW, wpm=15))
+    assert w._macros.cw_wpm == 30  # not re-adopted as the macro speed
+    # A genuine knob change to a new value is still followed.
+    w._maybe_follow_radio_wpm(RadioState(freq_hz=14_040_000, mode=Mode.CW, wpm=22))
+    assert w._macros.cw_wpm == 22
 
 
 # --- ADIF export default filename ------------------------------------------ #
@@ -905,6 +957,29 @@ def test_default_adif_path_without_park_omits_park_segment():
     assert name.startswith("W7ABC_")
     assert "@" not in name  # no park -> no @ segment
     assert name.endswith(".adif")
+
+
+def test_default_adif_path_all_stations_gets_all_suffix():
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W7ABC",
+        sent_exchange={"class": "1E", "section": "OR"},
+        network=None,
+        db_path=":memory:",
+    )
+    w = MainWindow(s)
+    mine = Path(w._default_adif_path(mine_only=True)).name
+    every = Path(w._default_adif_path(mine_only=False)).name
+    assert mine.endswith(".adif") and not mine.endswith("-all.adif")
+    assert every.endswith("-all.adif")  # distinct name so it won't overwrite
+    assert mine != every
 
 
 # --- new-log dialog: no nonsensical "My Their park" field ------------------ #
