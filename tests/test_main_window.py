@@ -1261,3 +1261,81 @@ def test_station_line_non_pota_has_no_park_segment():
     text = w._station_label.text()
     assert "W7ABC" in text
     assert "fer" not in text and "US-" not in text
+
+
+# --- FT8/FT4 caller buttons ------------------------------------------------ #
+def _caller_button_texts(w):
+    from PySide6.QtWidgets import QPushButton
+
+    return sorted(
+        b.text().replace("\n", "/") for b in w._wsjtx_panel._callers_host.findChildren(QPushButton)
+    )
+
+
+def test_wsjtx_decodes_become_caller_buttons_with_fd_section():
+    from partyhams.wsjtx.protocol import Decode
+
+    w = _window()  # Field Day
+    w._wsjtx_active = True
+    for msg in ("CQ N0XX EM10", "W7ABC K1ABC 2A EMA", "N0YY K9ZZ FN20", "W7ABC K1ABC RR73"):
+        w._on_wsjtx_decode(Decode(id="W", message=msg, snr=-3, time_ms=1000))
+    # Only stations calling us (W7ABC) become buttons; the section rides along; a
+    # repeat decode doesn't duplicate the button.
+    assert _caller_button_texts(w) == ["K1ABC/EMA"]
+
+
+def test_wsjtx_pota_activator_button_is_flagged_green():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.wsjtx.protocol import Decode
+
+    QApplication.instance() or QApplication([])
+    from partyhams.app.session import build_session
+    from partyhams.ui.main_window import MainWindow
+
+    s = build_session(
+        contest_id="pota", my_call="W7ABC", sent_exchange={},
+        extra={"park": "US-4403"}, network=None, db_path=":memory:",
+    )
+    w = MainWindow(s)
+    w._wsjtx_active = True
+    w._on_wsjtx_decode(Decode(id="W", message="CQ POTA AC2DEF EM99", snr=-1, time_ms=1))
+    w._on_wsjtx_decode(Decode(id="W", message="W7ABC AC2DEF EM99", snr=-1, time_ms=2))
+    from partyhams.core.models import utcnow
+
+    callers = w._callers.active(utcnow().timestamp())
+    assert [(c.call, c.pota) for c in callers] == [("AC2DEF", True)]
+
+
+def test_reply_to_caller_without_listener_is_graceful():
+    from partyhams.wsjtx.protocol import Decode
+
+    w = _window()
+    w._wsjtx_active = True
+    w._on_wsjtx_decode(Decode(id="W", message="W7ABC K1ABC FN42", snr=-3, time_ms=1))
+    w._reply_to_caller("K1ABC")  # no listener attached -> no crash
+
+
+def test_logging_a_qso_removes_that_caller_button():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.app.session import build_session
+    from partyhams.ui.main_window import MainWindow
+    from partyhams.wsjtx.protocol import Decode, QSOLogged
+
+    QApplication.instance() or QApplication([])
+    s = build_session(
+        contest_id="pota", my_call="W7ABC", sent_exchange={},
+        extra={"park": "US-4403"}, network=None, db_path=":memory:",
+    )
+    w = MainWindow(s)
+    w._wsjtx_active = True
+    w._on_wsjtx_decode(Decode(id="W", message="W7ABC K1ABC EM99", snr=-3, time_ms=1))
+    w._on_wsjtx_decode(Decode(id="W", message="W7ABC N5DEF FN42", snr=-3, time_ms=2))
+    assert {c.call for c in w._callers.active(__import__("time").time() + 1)} == {"K1ABC", "N5DEF"}
+
+    # WSJT-X reports we worked K1ABC -> their button goes away.
+    w._on_wsjtx_qso(QSOLogged(id="W", dx_call="K1ABC", mode="FT8", tx_frequency=14_074_000))
+    assert w._callers.decode_for("K1ABC") is None
+    remaining = {c.call for c in w._callers.active(__import__("time").time() + 1)}
+    assert remaining == {"N5DEF"}

@@ -22,6 +22,7 @@ from partyhams.wsjtx.protocol import (
     TYPE_HEARTBEAT,
     TYPE_HIGHLIGHT_CALLSIGN,
     TYPE_QSO_LOGGED,
+    TYPE_REPLY,
     TYPE_STATUS,
     Clear,
     Decode,
@@ -29,6 +30,7 @@ from partyhams.wsjtx.protocol import (
     QSOLogged,
     Status,
     encode_highlight_callsign,
+    encode_reply,
     parse_message,
 )
 
@@ -292,6 +294,35 @@ def test_encode_highlight_structure():
     assert rest[off + 4 : off + 4 + call_len] == b"K1ABC"
     # The trailing byte (highlight_last) is set.
     assert data[-1] == 1
+
+
+def test_encode_reply_echoes_the_decode():
+    decode = Decode(
+        id="WSJT-X",
+        message="W7PH K1ABC FN42",
+        snr=-7,
+        time_ms=123_456,
+        delta_time=0.2,
+        delta_freq=1500,
+        mode="FT8",
+    )
+    data = encode_reply("WSJT-X", decode)
+    magic, schema, mtype = struct.unpack(">III", data[:12])
+    assert (magic, schema, mtype) == (MAGIC, 2, TYPE_REPLY)
+    rest = data[12:]
+    id_len = struct.unpack(">I", rest[:4])[0]
+    assert rest[4 : 4 + id_len] == b"WSJT-X"
+    off = 4 + id_len
+    time_ms, snr = struct.unpack(">Ii", rest[off : off + 8])
+    assert time_ms == 123_456 and snr == -7
+    off += 8
+    (delta_time,) = struct.unpack(">d", rest[off : off + 8])
+    assert delta_time == 0.2
+    off += 8
+    (delta_freq,) = struct.unpack(">I", rest[off : off + 4])
+    assert delta_freq == 1500
+    # The original decode message is carried so WSJT-X knows which line to answer.
+    assert b"W7PH K1ABC FN42" in data
 
 
 def test_encode_highlight_invalid_color_resets():

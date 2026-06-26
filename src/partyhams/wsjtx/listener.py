@@ -25,6 +25,7 @@ from partyhams.wsjtx.protocol import (
     QSOLogged,
     Status,
     encode_highlight_callsign,
+    encode_reply,
     parse_message,
 )
 
@@ -148,6 +149,17 @@ class WsjtxListener:
         )
         try:
             self._transport.sendto(data, self.peer_addr)
+        except OSError:
+            return False
+        return True
+
+    def send_reply(self, wsjtx_id: str, decode) -> bool:  # noqa: ANN001 - protocol.Decode
+        """Ask WSJT-X to answer ``decode`` (UDP equivalent of double-clicking it).
+        Best-effort; returns False if we can't send yet."""
+        if self._transport is None or self.peer_addr is None:
+            return False
+        try:
+            self._transport.sendto(encode_reply(wsjtx_id, decode), self.peer_addr)
         except OSError:
             return False
         return True
