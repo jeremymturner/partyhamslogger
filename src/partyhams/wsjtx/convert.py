@@ -112,18 +112,26 @@ def parse_tx_power(raw: str) -> float | None:
     return value if value > 0 else None
 
 
-def qso_logged_to_record(msg: QSOLogged) -> dict[str, object]:
+def qso_logged_to_record(msg: QSOLogged, contest=None) -> dict[str, object]:  # noqa: ANN001
     """Build ``record_qso`` kwargs from a WSJT-X logged QSO.
 
-    The received grid (and any free-form exchange WSJT-X carries) goes into
-    ``exchange``; reports map to ``rst_sent``/``rst_rcvd``. The frequency is
-    WSJT-X's dial/Tx frequency in Hz.
+    The received exchange WSJT-X carries (e.g. Field Day ``"1D KS"``) is parsed
+    into the contest's named exchange fields (``{class, section}``) via
+    ``contest.parse_exchange`` so it displays and exports correctly; the grid
+    rides separately under ``"grid"`` (not part of the contest exchange).
+    Reports map to ``rst_sent``/``rst_rcvd``; frequency is WSJT-X's Tx freq (Hz).
     """
     exchange: dict[str, str] = {}
+    raw = (msg.exchange_recv or "").strip()
+    if raw and contest is not None:
+        try:
+            exchange.update(contest.parse_exchange(raw))
+        except Exception:  # noqa: BLE001 - keep the raw exchange if it doesn't fit
+            exchange["exchange"] = raw
+    elif raw:
+        exchange["exchange"] = raw
     if msg.dx_grid:
         exchange["grid"] = msg.dx_grid.strip().upper()
-    if msg.exchange_recv:
-        exchange["exchange"] = msg.exchange_recv.strip()
     record: dict[str, object] = {
         "call": msg.dx_call.strip().upper(),
         "freq_hz": int(msg.tx_frequency),

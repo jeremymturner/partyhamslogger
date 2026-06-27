@@ -1624,7 +1624,7 @@ class MainWindow(QMainWindow):
         derived uuid, so a duplicated UDP delivery (WSJT-X sends one copy per
         outgoing interface, and multicast can re-deliver) is deduped here rather
         than stacking up as repeated entries."""
-        kwargs = qso_logged_to_record(msg)
+        kwargs = qso_logged_to_record(msg, self.session.contest)
         if not kwargs["call"]:
             return
         existing = self.session.engine.log.get(str(kwargs["uuid"]))
