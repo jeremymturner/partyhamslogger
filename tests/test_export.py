@@ -51,6 +51,27 @@ async def make_logged_session():
     return s
 
 
+async def test_adif_field_day_srx_is_exchange_only_grid_goes_to_gridsquare():
+    # A Field Day FT8 QSO whose received exchange is class+section, with an FT8 grid.
+    s = build_session(
+        contest_id="arrl-field-day",
+        my_call="W0CPH",
+        sent_exchange={"class": "5A", "section": "WY"},
+        network=None,
+    )
+    await s.log_qso(
+        call="NE0A",
+        freq_hz=28_074_765,
+        mode=Mode.FT8,
+        exchange={"class": "1D", "section": "KS", "grid": "EM29"},
+    )
+    adif = s.export_adif()
+    assert "<SRX_STRING:5>1D KS" in adif  # just the exchange, no grid
+    assert "<GRIDSQUARE:4>EM29" in adif  # grid exported on its own
+    assert "EM29 1D KS" not in adif  # grid no longer fused into the exchange
+    assert "<STX_STRING:5>5A WY" in adif
+
+
 async def test_adif_mine_only_filters_to_this_station():
     from dataclasses import replace
 

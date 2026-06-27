@@ -97,10 +97,12 @@ def _adif_band(label: str) -> str:
 
 
 def _exchange_string(exchange: dict[str, str]) -> str:
-    return " ".join(str(v) for v in exchange.values() if v)
+    # "grid" is a separate concept (the FT8 grid square -> GRIDSQUARE), never part
+    # of the contest exchange string.
+    return " ".join(str(v) for k, v in exchange.items() if v and k != "grid")
 
 
-def qso_to_adif(qso: QSO, config: ContestConfig) -> str:
+def qso_to_adif(qso: QSO, config: ContestConfig, contest: ContestDefinition | None = None) -> str:
     parts = [
         _field("CALL", qso.call.upper()),
         _field("QSO_DATE", qso.timestamp.strftime("%Y%m%d")),
@@ -137,11 +139,21 @@ def qso_to_adif(qso: QSO, config: ContestConfig) -> str:
     if my_loc and "," not in my_loc and "-" in my_loc:
         parts.append(_field("MY_STATE", my_loc.split("-", 1)[1]))
     sent = _exchange_string(config.sent_exchange)
-    rcvd = _exchange_string(qso.exchange_rcvd)
+    # The received exchange is just the contest's exchange fields (class/section),
+    # in order — not the grid, which is exported separately as GRIDSQUARE.
+    if contest is not None:
+        rcvd = " ".join(
+            qso.exchange_rcvd.get(f.name, "") for f in contest.exchange_fields()
+        ).strip()
+    else:
+        rcvd = _exchange_string(qso.exchange_rcvd)
     if sent:
         parts.append(_field("STX_STRING", sent))
     if rcvd:
         parts.append(_field("SRX_STRING", rcvd))
+    grid = str(qso.exchange_rcvd.get("grid", "") or "").strip()
+    if grid:
+        parts.append(_field("GRIDSQUARE", grid))
     return "".join(parts) + "<EOR>"
 
 
@@ -161,5 +173,5 @@ def write_adif(
         header_lines.append(_field("CONTEST_ID", contest.cabrillo_name))
     header = "\n".join(header_lines) + "<EOH>\n"
 
-    body = "\n".join(qso_to_adif(q, config) for q in qsos if not q.deleted)
+    body = "\n".join(qso_to_adif(q, config, contest) for q in qsos if not q.deleted)
     return header + body + ("\n" if body else "")

@@ -381,6 +381,18 @@ def test_qso_logged_to_record_mapping():
     assert kwargs["timestamp"] == datetime(2026, 6, 7, 18, 30, 15, tzinfo=UTC)
 
 
+def test_qso_logged_to_record_parses_contest_exchange_and_keeps_grid_separate():
+    from partyhams.contest import get
+
+    msg = parse_message(_qso_logged_bytes())  # exchange_recv "2A WWA", grid FN42
+    kwargs = qso_logged_to_record(msg, get("arrl-field-day"))
+    ex = kwargs["exchange"]
+    assert ex["class"] == "2A"  # parsed into the contest's named fields
+    assert ex["section"] == "WWA"
+    assert ex["grid"] == "FN42"  # grid rides separately, not in the exchange
+    assert "exchange" not in ex  # not dumped as a generic blob
+
+
 def test_qso_logged_to_record_defaults_when_blank():
     msg = QSOLogged(id="X", dx_call="k1abc", tx_frequency=7_074_000, mode="FT4")
     kwargs = qso_logged_to_record(msg)
