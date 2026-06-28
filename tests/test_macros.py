@@ -65,12 +65,43 @@ def test_esm_step_run():
     assert done.key == 3 and done.reset
 
 
+def test_esm_step_run_partial_call_holds():
+    # A partial call ("?") in Run sends it back verbatim and does NOT advance:
+    # query is set, key is None, and none of the advance flags fire.
+    q = esm_step(True, call_present=True, esm_sent=False, exch_complete=False, call_uncertain=True)
+    assert q.query and q.key is None
+    assert not (q.set_sent or q.log or q.reset)
+    # The hold sticks even after the exchange has been sent.
+    q2 = esm_step(True, call_present=True, esm_sent=True, exch_complete=True, call_uncertain=True)
+    assert q2.query and q2.key is None
+
+    # With the opt-in checkbox, an uncertain call behaves exactly as a normal one.
+    s = esm_step(
+        True,
+        call_present=True,
+        esm_sent=False,
+        exch_complete=False,
+        call_uncertain=True,
+        send_on_query=True,
+    )
+    assert s.key == 2 and s.set_sent and not s.query
+
+    # An empty call still triggers CQ regardless of the uncertain flag.
+    assert esm_step(True, call_present=False, esm_sent=False, exch_complete=False).query is False
+
+
 def test_esm_step_sp():
     assert esm_step(False, call_present=False, esm_sent=False, exch_complete=False).key is None
     s = esm_step(False, call_present=True, esm_sent=False, exch_complete=False)
     assert s.key == 4 and s.set_sent and s.focus_exchange
     final = esm_step(False, call_present=True, esm_sent=True, exch_complete=True)
     assert final.key == 2 and final.log and final.reset
+
+
+def test_esm_step_sp_ignores_partial_call():
+    # The partial-call hold is Run-only; S&P advances normally even with "?".
+    s = esm_step(False, call_present=True, esm_sent=False, exch_complete=False, call_uncertain=True)
+    assert s.key == 4 and s.set_sent and not s.query
 
 
 def test_load_defaults_and_round_trip(tmp_path):

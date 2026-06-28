@@ -215,6 +215,12 @@ class MainWindow(QMainWindow):
         self._run = True  # Run vs Search & Pounce (picks the macro bank)
         self._esm = False  # ESM: Enter sends the next message
         self._esm_sent = False  # have we sent our exchange/call this QSO?
+        # When the Run call field holds a partial call ("?"), Enter sends it back
+        # verbatim instead of advancing — unless this opts into the old behavior.
+        # Persisted via on_change_esm_send_on_query / set_esm_send_on_query.
+        self._esm_send_on_query = False
+        self.on_change_esm_send_on_query: Callable[[bool], None] | None = None
+        self._esm_query_action = None  # the Macros-menu checkbox (set when built)
         #: When set, the log table is filtered to this callsign (every QSO the
         #: network has logged with it) — driven by a dupe on the call field.
         self._call_filter = ""
@@ -846,6 +852,18 @@ class MainWindow(QMainWindow):
         self._update_fkey_bar()
         self.statusBar().showMessage(f"ESM {'on' if on else 'off'}", 2000)
 
+    def set_esm_send_on_query(self, on: bool) -> None:
+        """Set (without persisting) whether a Run partial call sends the exchange
+        anyway. Called from app state on launch; the menu toggle persists changes."""
+        self._esm_send_on_query = bool(on)
+        if self._esm_query_action is not None:
+            self._esm_query_action.setChecked(self._esm_send_on_query)
+
+    def _toggle_esm_send_on_query(self, on: bool) -> None:
+        self._esm_send_on_query = bool(on)
+        if self.on_change_esm_send_on_query is not None:
+            self.on_change_esm_send_on_query(self._esm_send_on_query)
+
     def _setup_fkey_shortcuts(self) -> None:
         for key in range(1, 13):
             seq = QKeySequence(getattr(Qt.Key, f"Key_F{key}"))
@@ -1123,8 +1141,14 @@ class MainWindow(QMainWindow):
             bool(self._call.text().strip()),
             self._esm_sent,
             self._exchange_complete(),
+            call_uncertain=self._call_uncertain(),
+            send_on_query=self._esm_send_on_query,
         )
         return step.key
+
+    def _call_uncertain(self) -> bool:
+        """True when the call field holds a partial call (a typed ``?``, e.g. ``N0?``)."""
+        return "?" in self._call.text()
 
     def _on_enter(self) -> None:
         if self._esm:
@@ -1138,7 +1162,16 @@ class MainWindow(QMainWindow):
             bool(self._call.text().strip()),
             self._esm_sent,
             self._exchange_complete(),
+            call_uncertain=self._call_uncertain(),
+            send_on_query=self._esm_send_on_query,
         )
+        if step.query:
+            # Partial call (Run): send exactly what's typed (e.g. "N0?") to ask
+            # for a fill, and don't advance the QSO.
+            text = self._call.text().strip()
+            if text:
+                self._send_cw(text)
+            return
         if step.key is None:
             self._call.setFocus()
             return
@@ -1420,6 +1453,15 @@ class MainWindow(QMainWindow):
         esm_action.setCheckable(True)
         esm_action.setShortcut(QKeySequence(sc.TOGGLE_ESM))
         esm_action.toggled.connect(self._set_esm)
+        query_action = macros_menu.addAction("ESM — Send exchange on partial call (?)")
+        query_action.setCheckable(True)
+        query_action.setChecked(self._esm_send_on_query)
+        query_action.setStatusTip(
+            "When off (default), a Run call with '?' (e.g. N0?) is sent back verbatim "
+            "instead of advancing the QSO"
+        )
+        query_action.toggled.connect(self._toggle_esm_send_on_query)
+        self._esm_query_action = query_action
         self._build_autocq_menu(macros_menu)
 
         # The dock toggle is added to this menu later by _build_network_panel.

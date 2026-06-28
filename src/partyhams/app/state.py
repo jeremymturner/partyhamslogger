@@ -62,6 +62,9 @@ class AppState:
     auto_update_interval_hours: int = 1
     #: Who owns the CW keyer speed: "restore" / "always" / "sync" (see app.macros).
     cw_speed_mode: str = "sync"
+    #: In Run ESM, send the exchange anyway when the call holds a partial ("?").
+    #: Off (default) sends the partial call back verbatim instead of advancing.
+    esm_send_on_query: bool = False
 
 
 def load_state(path: Path = STATE_FILE) -> AppState:
@@ -88,6 +91,7 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         auto_update_enabled=data.get("auto_update_enabled", True),
         auto_update_interval_hours=data.get("auto_update_interval_hours", 1),
         cw_speed_mode=data.get("cw_speed_mode", "sync"),
+        esm_send_on_query=data.get("esm_send_on_query", False),
     )
 
 
@@ -112,6 +116,7 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "auto_update_enabled": state.auto_update_enabled,
         "auto_update_interval_hours": state.auto_update_interval_hours,
         "cw_speed_mode": state.cw_speed_mode,
+        "esm_send_on_query": state.esm_send_on_query,
     }
     path.write_text(json.dumps(payload, indent=2))
 
