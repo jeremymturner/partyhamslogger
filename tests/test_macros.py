@@ -73,6 +73,48 @@ def test_esm_step_sp():
     assert final.key == 2 and final.log and final.reset
 
 
+def test_esm_step_partial_call_run_holds():
+    # A "?" in the call field (partial call) holds the QSO in Run: query step, no advance.
+    s = esm_step(
+        True, call_present=True, esm_sent=False, exch_complete=False, call_uncertain=True
+    )
+    assert s.query and s.key is None and not s.set_sent and not s.log and not s.reset
+    # The hold persists even after we've sent the exchange, until the "?" is gone.
+    s2 = esm_step(
+        True, call_present=True, esm_sent=True, exch_complete=True, call_uncertain=True
+    )
+    assert s2.query and s2.key is None
+
+
+def test_esm_step_partial_call_send_anyway():
+    # With the opt-in policy, a "?" no longer holds — ESM runs the exchange as usual.
+    s = esm_step(
+        True,
+        call_present=True,
+        esm_sent=False,
+        exch_complete=False,
+        call_uncertain=True,
+        send_on_query=True,
+    )
+    assert not s.query and s.key == 2 and s.set_sent
+
+
+def test_esm_step_partial_call_sp_unaffected():
+    # S&P ignores the partial-call hold entirely (Run-only feature).
+    s = esm_step(
+        False, call_present=True, esm_sent=False, exch_complete=False, call_uncertain=True
+    )
+    assert not s.query and s.key == 4 and s.set_sent
+
+
+def test_esm_step_empty_call_still_cqs():
+    # An empty field still CQs even if flagged uncertain (no call to send back).
+    s = esm_step(
+        True, call_present=False, esm_sent=False, exch_complete=False, call_uncertain=True
+    )
+    assert not s.query and s.key == 1
+
+
 def test_load_defaults_and_round_trip(tmp_path):
     contest = get("arrl-field-day")
     # No file yet -> contest defaults.
