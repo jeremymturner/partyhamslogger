@@ -672,6 +672,55 @@ def test_cw_keyboard_streams_appended_chars_and_enter_clears():
     assert sent == ["C", "Q", " ", "K"]
 
 
+# --- ESM partial-call handling (issue #36) -----------------------------------
+
+
+def test_esm_partial_call_sends_verbatim_and_selects_question_mark():
+    w = _window()
+    sent = []
+    w._send_cw = lambda text, *a, **k: sent.append(text)
+    w._set_esm(True)  # Run is the default mode
+    w._call.setText("N0?W")
+
+    w._on_enter()
+
+    # The partial call is sent back exactly as typed, and the QSO does NOT advance.
+    assert sent == ["N0?W"]
+    assert w._esm_sent is False
+    # The "?" is selected so a typed fill-in overwrites it.
+    assert w._call.selectedText() == "?"
+
+
+def test_esm_partial_call_send_anyway_policy_advances():
+    w = _window()
+    sent = []
+    w._send_cw = lambda text, *a, **k: sent.append(text)
+    w.set_esm_send_on_query(True)  # opt in: run the exchange anyway
+    w._set_esm(True)
+    w._call.setText("N0?W")
+
+    w._on_enter()
+
+    # With the policy on, ESM advances (marks the exchange sent) instead of holding.
+    assert w._esm_sent is True
+    assert w._call.selectedText() != "?"
+
+
+def test_esm_partial_call_ignored_in_sp():
+    w = _window()
+    sent = []
+    w._send_cw = lambda text, *a, **k: sent.append(text)
+    w._set_esm(True)
+    w._set_run(False)  # Search & Pounce
+    w._call.setText("N0?W")
+
+    w._on_enter()
+
+    # S&P sends my call (F4) and advances; the partial-call hold is Run-only.
+    assert w._esm_sent is True
+    assert w._call.selectedText() != "?"
+
+
 # --- call-history exchange auto-fill (issue #3) -------------------------------
 
 

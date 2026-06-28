@@ -44,6 +44,7 @@ from partyhams.app.macros import (
     CW_SPEED_SYNC,
     WPM_MAX,
     WPM_MIN,
+    ESMStep,
     bank_key,
     clamp_wpm,
     cw_duration_seconds,
@@ -115,7 +116,9 @@ def _format_tx_status(word: str, key: int, label: str, text: str) -> str:
     ``word`` is ``TRANSMITTING`` while sending, then ``SENT`` once done.
     """
     label_part = f" — {label}" if label else ""
-    return f"{word} — F{key}{label_part} — {text}"
+    # key <= 0 marks a non-F-key send (e.g. a partial call) — omit the "Fn" tag.
+    key_part = f" — F{key}" if key > 0 else ""
+    return f"{word}{key_part}{label_part} — {text}"
 
 
 #: Allowed Auto-CQ repeat intervals (seconds) and the clamp bounds.
@@ -215,6 +218,12 @@ class MainWindow(QMainWindow):
         self._run = True  # Run vs Search & Pounce (picks the macro bank)
         self._esm = False  # ESM: Enter sends the next message
         self._esm_sent = False  # have we sent our exchange/call this QSO?
+        # Partial-call policy (Run ESM): when False (default), a "?" in the call
+        # field makes Enter send the partial verbatim and hold; when True, ESM
+        # advances anyway. Set from app state; persisted via on_change_esm_send_on_query.
+        self._esm_send_on_query = False
+        self.on_change_esm_send_on_query: Callable[[bool], None] | None = None
+        self._esm_send_on_query_action = None
         #: When set, the log table is filtered to this callsign (every QSO the
         #: network has logged with it) — driven by a dupe on the call field.
         self._call_filter = ""
@@ -846,6 +855,17 @@ class MainWindow(QMainWindow):
         self._update_fkey_bar()
         self.statusBar().showMessage(f"ESM {'on' if on else 'off'}", 2000)
 
+    def set_esm_send_on_query(self, on: bool) -> None:
+        """Apply the persisted partial-call policy (no save callback fired)."""
+        self._esm_send_on_query = bool(on)
+        if self._esm_send_on_query_action is not None:
+            self._esm_send_on_query_action.setChecked(self._esm_send_on_query)
+
+    def _set_esm_send_on_query(self, on: bool) -> None:
+        self._esm_send_on_query = bool(on)
+        if self.on_change_esm_send_on_query is not None:
+            self.on_change_esm_send_on_query(self._esm_send_on_query)
+
     def _setup_fkey_shortcuts(self) -> None:
         for key in range(1, 13):
             seq = QKeySequence(getattr(Qt.Key, f"Key_F{key}"))
@@ -1115,16 +1135,21 @@ class MainWindow(QMainWindow):
         parsed = {n: e.text().strip().upper() for n, e in self._exchange_edits.items()}
         return not self.session.validate_exchange(parsed)
 
+    def _esm_step(self) -> ESMStep:
+        call_text = self._call.text()
+        return esm_step(
+            self._run,
+            bool(call_text.strip()),
+            self._esm_sent,
+            self._exchange_complete(),
+            call_uncertain="?" in call_text,
+            send_on_query=self._esm_send_on_query,
+        )
+
     def _esm_next_key(self) -> int | None:
         if not self._esm:
             return None
-        step = esm_step(
-            self._run,
-            bool(self._call.text().strip()),
-            self._esm_sent,
-            self._exchange_complete(),
-        )
-        return step.key
+        return self._esm_step().key
 
     def _on_enter(self) -> None:
         if self._esm:
@@ -1133,12 +1158,10 @@ class MainWindow(QMainWindow):
             self._advance_or_log()
 
     def _esm_advance(self) -> None:
-        step = esm_step(
-            self._run,
-            bool(self._call.text().strip()),
-            self._esm_sent,
-            self._exchange_complete(),
-        )
+        step = self._esm_step()
+        if step.query:
+            self._send_partial_call()
+            return
         if step.key is None:
             self._call.setFocus()
             return
@@ -1152,6 +1175,19 @@ class MainWindow(QMainWindow):
         if step.reset:
             self._esm_sent = False
         self._update_fkey_bar()
+
+    def _send_partial_call(self) -> None:
+        """Run ESM, partial call: send the call field verbatim (e.g. ``N0?W``) and
+        hold the QSO. The first ``?`` is left selected so the operator can type the
+        fill-in character(s) to overwrite it as more of the call is copied."""
+        call = self._call.text().strip()
+        if call:
+            self._send_cw(call, tx_desc=(0, "Partial", call))
+        # Select the first "?" so a typed fill-in replaces it (N1MM-style).
+        self._call.setFocus()
+        idx = self._call.text().find("?")
+        if idx >= 0:
+            self._call.setSelection(idx, 1)
 
     def _focus_first_empty_exchange(self) -> None:
         for field in self.session.contest.exchange_fields():
@@ -1420,6 +1456,15 @@ class MainWindow(QMainWindow):
         esm_action.setCheckable(True)
         esm_action.setShortcut(QKeySequence(sc.TOGGLE_ESM))
         esm_action.toggled.connect(self._set_esm)
+        send_on_query = macros_menu.addAction("ESM — Send exchange on partial call (?)")
+        send_on_query.setCheckable(True)
+        send_on_query.setChecked(self._esm_send_on_query)
+        send_on_query.setStatusTip(
+            "When off (default), a '?' in the call field sends the partial verbatim and "
+            "holds; when on, Enter runs the exchange anyway (Run mode)"
+        )
+        send_on_query.toggled.connect(self._set_esm_send_on_query)
+        self._esm_send_on_query_action = send_on_query
         self._build_autocq_menu(macros_menu)
 
         # The dock toggle is added to this menu later by _build_network_panel.

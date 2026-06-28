@@ -290,6 +290,8 @@ def run() -> int:
             window.set_auto_update(state.auto_update_enabled, state.auto_update_interval_hours)
             window.on_change_cw_speed_mode = _change_cw_speed_mode
             window.set_cw_speed_mode(state.cw_speed_mode)
+            window.on_change_esm_send_on_query = _change_esm_send_on_query
+            window.set_esm_send_on_query(state.esm_send_on_query)
             window.show()
             ctx["poller"] = await _start_poller(_poller_from_radio(state.radio), window)
             window.set_poller(ctx["poller"])
@@ -422,6 +424,10 @@ def run() -> int:
 
     def _change_cw_speed_mode(mode: str) -> None:
         state.cw_speed_mode = mode
+        save_state(state)
+
+    def _change_esm_send_on_query(on: bool) -> None:
+        state.esm_send_on_query = on
         save_state(state)
 
     # --- theme change (live) ---
