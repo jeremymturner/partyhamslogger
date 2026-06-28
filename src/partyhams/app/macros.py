@@ -113,17 +113,33 @@ class ESMStep:
     reset: bool = False  # QSO finished -> clear the sent flag
     log: bool = False  # log the QSO after firing the key
     focus_exchange: bool = False  # move to the first empty exchange field
+    query: bool = False  # partial call ("?"): send the call verbatim, don't advance
 
 
-def esm_step(run: bool, call_present: bool, esm_sent: bool, exch_complete: bool) -> ESMStep:
+def esm_step(
+    run: bool,
+    call_present: bool,
+    esm_sent: bool,
+    exch_complete: bool,
+    call_uncertain: bool = False,
+    send_on_query: bool = False,
+) -> ESMStep:
     """Map the current entry state to the next ESM action (N1MM-style).
 
     Run:  CQ (F1) → send exchange (F2) → TU + log (F3).
     S&P:  send my call (F4) → send exchange + log (F2).
+
+    ``call_uncertain`` is true when the call field holds a partial call (a typed
+    ``?``, e.g. ``N0?W``). In Run, unless ``send_on_query`` is set, Enter sends the
+    partial back verbatim and the QSO does *not* advance (returns ``query=True``).
+    S&P is unaffected.
     """
     if run:
         if not call_present:
             return ESMStep(1)  # CQ
+        if call_uncertain and not send_on_query:
+            # Partial call: send it (e.g. "N0?W") and hold — don't run the exchange.
+            return ESMStep(None, query=True)
         if not esm_sent:
             return ESMStep(2, set_sent=True, focus_exchange=True)  # send exchange
         if not exch_complete:
