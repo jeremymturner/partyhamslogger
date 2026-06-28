@@ -812,6 +812,42 @@ def test_cw_speed_menu_reflects_and_persists_mode():
     assert w._cw_speed_mode == "sync"
 
 
+def test_esm_send_on_query_menu_reflects_and_persists():
+    w = _window()
+    saved: list[bool] = []
+    w.on_change_esm_send_on_query = saved.append
+
+    # set_* applies to the menu action but does not persist.
+    w.set_esm_send_on_query(True)
+    assert w._esm_send_on_query is True
+    assert w._esm_send_on_query_action.isChecked()
+    assert saved == []
+
+    # A menu toggle persists via the callback.
+    w._set_esm_send_on_query(False)
+    assert w._esm_send_on_query is False
+    assert saved == [False]
+
+
+def test_esm_partial_call_sends_partial_and_holds():
+    w = _window()
+    w._set_esm(True)
+    w._set_run(True)
+    sent: list[str] = []
+    w._send_cw = lambda text, *a, **k: sent.append(text)
+    w._call.setText("N0?")
+
+    w._esm_advance()
+    assert sent == ["N0?"]  # the partial call went out...
+    assert not w._esm_sent  # ...and the QSO did not advance
+
+    # With the checkbox on, a "?" advances normally (sends the exchange).
+    sent.clear()
+    w.set_esm_send_on_query(True)
+    w._esm_advance()
+    assert w._esm_sent  # the exchange was sent, QSO progressed
+
+
 def test_sync_mode_adopts_radio_wpm_other_modes_ignore_it():
     w = _window()
     w._macros.cw_wpm = 28

@@ -73,6 +73,43 @@ def test_esm_step_sp():
     assert final.key == 2 and final.log and final.reset
 
 
+def test_esm_step_partial_call_holds_by_default():
+    # A "?" in the call field (partial call) holds the QSO in both Run and S&P:
+    # the step asks to send the partial call back, not advance the exchange.
+    for run in (True, False):
+        s = esm_step(
+            run,
+            call_present=True,
+            esm_sent=False,
+            exch_complete=False,
+            call_uncertain=True,
+        )
+        assert s.query and s.key is None
+        assert not s.set_sent and not s.log and not s.reset
+
+
+def test_esm_step_partial_call_send_on_query_advances():
+    # With the checkbox on, a "?" behaves exactly as a normal call would.
+    run_step = esm_step(
+        True,
+        call_present=True,
+        esm_sent=False,
+        exch_complete=False,
+        call_uncertain=True,
+        send_on_query=True,
+    )
+    assert not run_step.query and run_step.key == 2 and run_step.set_sent
+    sp_step = esm_step(
+        False,
+        call_present=True,
+        esm_sent=False,
+        exch_complete=False,
+        call_uncertain=True,
+        send_on_query=True,
+    )
+    assert not sp_step.query and sp_step.key == 4 and sp_step.set_sent
+
+
 def test_load_defaults_and_round_trip(tmp_path):
     contest = get("arrl-field-day")
     # No file yet -> contest defaults.

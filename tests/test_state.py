@@ -41,6 +41,13 @@ def test_cw_speed_mode_round_trip(tmp_path):
     assert load_state(path).cw_speed_mode == "restore"
 
 
+def test_esm_send_on_query_round_trip(tmp_path):
+    path = tmp_path / "state.json"
+    assert load_state(path).esm_send_on_query is False  # default: hold on "?"
+    save_state(AppState(esm_send_on_query=True), path)
+    assert load_state(path).esm_send_on_query is True
+
+
 def test_recent_logs_round_trip(tmp_path):
     path = tmp_path / "state.json"
     state = AppState()
