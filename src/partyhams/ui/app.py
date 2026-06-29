@@ -34,7 +34,11 @@ from partyhams.app.session import (
     summarize_log,
 )
 from partyhams.app.state import AppState, load_state, new_log_path, push_recent, save_state
-from partyhams.radio.civ_protocol import CIV_ADDR_IC705, CIV_ADDR_IC7610
+from partyhams.radio.civ_protocol import (
+    CIV_ADDR_IC705,
+    CIV_ADDR_IC7300MK2,
+    CIV_ADDR_IC7610,
+)
 from partyhams.radio.flex import FlexRadio
 from partyhams.radio.hamlib import HamlibRadio
 from partyhams.radio.icom_civ import IcomCIV
@@ -120,13 +124,26 @@ def _poller_from_radio(radio: dict | None) -> RadioPoller | None:
         return None
     kind = radio.get("kind", "none")
     conn = radio.get("conn", "").strip()
-    if kind in ("icom705", "icom7610"):  # conn is a serial port path
-        addr = CIV_ADDR_IC705 if kind == "icom705" else CIV_ADDR_IC7610
-        return RadioPoller(IcomCIV(conn, civ_address=addr))
-    if kind in ("icom705-lan", "icom7610-lan"):  # conn is the radio's IP/hostname
-        addr = CIV_ADDR_IC705 if kind == "icom705-lan" else CIV_ADDR_IC7610
+    _civ_serial_addrs = {
+        "icom705": CIV_ADDR_IC705,
+        "icom7610": CIV_ADDR_IC7610,
+        "icom7300mk2": CIV_ADDR_IC7300MK2,
+    }
+    _civ_lan_addrs = {
+        "icom705-lan": CIV_ADDR_IC705,
+        "icom7610-lan": CIV_ADDR_IC7610,
+        "icom7300mk2-lan": CIV_ADDR_IC7300MK2,
+    }
+    if kind in _civ_serial_addrs:  # conn is a serial port path
+        return RadioPoller(IcomCIV(conn, civ_address=_civ_serial_addrs[kind]))
+    if kind in _civ_lan_addrs:  # conn is the radio's IP/hostname
         return RadioPoller(
-            IcomNet(conn, radio.get("user", ""), radio.get("password", ""), civ_address=addr)
+            IcomNet(
+                conn,
+                radio.get("user", ""),
+                radio.get("password", ""),
+                civ_address=_civ_lan_addrs[kind],
+            )
         )
     host, _, port_str = conn.partition(":")
     host = host.strip() or None

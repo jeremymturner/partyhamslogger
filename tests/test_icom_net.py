@@ -8,7 +8,11 @@ from fake_icom_net import FakeIcomRadio
 
 from partyhams.core.models import Mode
 from partyhams.radio.base import Capability
-from partyhams.radio.civ_protocol import CIV_ADDR_IC705, CIV_ADDR_IC7610
+from partyhams.radio.civ_protocol import (
+    CIV_ADDR_IC705,
+    CIV_ADDR_IC7300MK2,
+    CIV_ADDR_IC7610,
+)
 from partyhams.radio.icom_net import IcomNet
 
 
@@ -58,6 +62,27 @@ async def test_send_cw_and_caps():
         assert radio.cw_sent == ["CQ TEST"]
         # IC-7610 advertises a sub-receiver; IC-705 does not.
         assert Capability.SUB_RECEIVER in drv.capabilities
+    finally:
+        await drv.disconnect()
+        await radio.stop()
+
+
+async def test_ic7300mk2_lan():
+    # The IC-7300 MK2's built-in Ethernet speaks Icom's native UDP remote protocol
+    # (same as the IC-705/IC-7610), so the existing LAN driver works once it knows
+    # the MK2's CI-V address (0xB6). NOTE: unverified against real hardware.
+    radio = FakeIcomRadio(civ_address=CIV_ADDR_IC7300MK2, name="IC-7300 MK2")
+    drv = await _connect(radio)
+    try:
+        state = await drv.read_state()
+        assert state.freq_hz == 14_000_000
+        assert state.mode is Mode.CW
+        assert "IC-7300 MK2" in drv.description()
+        # Single-receiver radio: must not advertise the IC-7610's sub-receiver.
+        assert Capability.SUB_RECEIVER not in drv.capabilities
+
+        await drv.set_frequency(7_030_000)
+        assert radio.freq == 7_030_000
     finally:
         await drv.disconnect()
         await radio.stop()
