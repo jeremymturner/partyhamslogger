@@ -1,4 +1,4 @@
-"""Icom LAN (native UDP) backend — direct Ethernet/Wi-Fi to IC-705 / IC-7610.
+"""Icom LAN (native UDP) backend — direct Ethernet/Wi-Fi to IC-705 / IC-7610 / IC-7300 MK2.
 
 Connects straight to a network-equipped Icom rig (no serial bridge) using Icom's
 proprietary UDP protocol — see ``radio/icom_net_protocol.py`` for the wire format.
@@ -24,6 +24,7 @@ from partyhams.radio.base import RadioUnsupported
 from partyhams.radio.civ_commands import CivRadio
 from partyhams.radio.civ_protocol import (
     CIV_ADDR_IC705,
+    CIV_ADDR_IC7300MK2,
     CIV_ADDR_IC7610,
     CONTROLLER_ADDR,
     build_frame,
@@ -31,7 +32,11 @@ from partyhams.radio.civ_protocol import (
 )
 from partyhams.radio.registry import register
 
-_MODEL_NAMES = {CIV_ADDR_IC705: "IC-705", CIV_ADDR_IC7610: "IC-7610"}
+_MODEL_NAMES = {
+    CIV_ADDR_IC705: "IC-705",
+    CIV_ADDR_IC7610: "IC-7610",
+    CIV_ADDR_IC7300MK2: "IC-7300 MK2",
+}
 _CONNECT_TIMEOUT = 10.0  # seconds to reach an authenticated, CI-V-open session
 _TRANSACT_TIMEOUT = 0.6
 

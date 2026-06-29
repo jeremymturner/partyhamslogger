@@ -1,6 +1,6 @@
-"""Icom CI-V native backend — validation targets: IC-705 and IC-7610.
+"""Icom CI-V native backend — validation targets: IC-705, IC-7610, IC-7300 MK2.
 
-One driver for both radios (they share CI-V; only the default address differs).
+One driver for all of them (they share CI-V; only the default address differs).
 Talks the CI-V serial protocol (``radio/civ_protocol.py``) over a USB/serial port
 via pyserial. Serial I/O is blocking, so each transaction runs in a thread executor
 to keep the asyncio loop responsive; transactions are serialized with a lock.
@@ -24,6 +24,7 @@ from partyhams.radio.civ_commands import CivRadio
 from partyhams.radio.civ_protocol import (
     ACK_OK,
     CIV_ADDR_IC705,
+    CIV_ADDR_IC7300MK2,
     CIV_ADDR_IC7610,
     CONTROLLER_ADDR,
     build_frame,
@@ -31,7 +32,11 @@ from partyhams.radio.civ_protocol import (
 )
 from partyhams.radio.registry import register
 
-_MODEL_NAMES = {CIV_ADDR_IC705: "IC-705", CIV_ADDR_IC7610: "IC-7610"}
+_MODEL_NAMES = {
+    CIV_ADDR_IC705: "IC-705",
+    CIV_ADDR_IC7610: "IC-7610",
+    CIV_ADDR_IC7300MK2: "IC-7300 MK2",
+}
 
 
 @register
