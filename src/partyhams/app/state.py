@@ -62,6 +62,13 @@ class AppState:
     auto_update_interval_hours: int = 1
     #: Who owns the CW keyer speed: "restore" / "always" / "sync" (see app.macros).
     cw_speed_mode: str = "sync"
+    #: Quick CW WPM preset buttons on the CW speed bar — click one to set the macro
+    #: speed. Right-click a button to edit/delete; the + button adds one. Configurable
+    #: in Radio → CW WPM Presets…. Seeded with 24 and 20.
+    cw_wpm_presets: list[int] = field(default_factory=lambda: [24, 20])
+    #: Master switch for the CW WPM preset feature. When False, no preset buttons or
+    #: the + add button are shown on the CW speed bar at all.
+    cw_presets_enabled: bool = True
     #: Run-ESM partial-call policy. False (default): a "?" in the call field sends
     #: the partial verbatim and holds the QSO. True: ESM runs the exchange anyway.
     esm_send_on_query: bool = False
@@ -91,6 +98,8 @@ def load_state(path: Path = STATE_FILE) -> AppState:
         auto_update_enabled=data.get("auto_update_enabled", True),
         auto_update_interval_hours=data.get("auto_update_interval_hours", 1),
         cw_speed_mode=data.get("cw_speed_mode", "sync"),
+        cw_wpm_presets=[int(v) for v in data.get("cw_wpm_presets", [24, 20])],
+        cw_presets_enabled=data.get("cw_presets_enabled", True),
         esm_send_on_query=data.get("esm_send_on_query", False),
     )
 
@@ -116,6 +125,8 @@ def save_state(state: AppState, path: Path = STATE_FILE) -> None:
         "auto_update_enabled": state.auto_update_enabled,
         "auto_update_interval_hours": state.auto_update_interval_hours,
         "cw_speed_mode": state.cw_speed_mode,
+        "cw_wpm_presets": state.cw_wpm_presets,
+        "cw_presets_enabled": state.cw_presets_enabled,
         "esm_send_on_query": state.esm_send_on_query,
     }
     path.write_text(json.dumps(payload, indent=2))

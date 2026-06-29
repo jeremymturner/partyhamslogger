@@ -24,9 +24,11 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QProgressBar,
     QPushButton,
     QSpinBox,
@@ -52,6 +54,7 @@ from partyhams.app.macros import (
     expand,
     load_macros,
     normalize_cw_speed_mode,
+    normalize_wpm_presets,
     save_macros,
 )
 from partyhams.app.radio import RadioPoller
@@ -234,6 +237,11 @@ class MainWindow(QMainWindow):
         self._cw_speed_mode = CW_SPEED_SYNC
         self.on_change_cw_speed_mode: Callable[[str], None] | None = None
         self._cw_speed_actions: dict[str, object] = {}
+        # Quick CW WPM presets shown on the CW speed bar. Set from app state via
+        # set_cw_wpm_presets; the app persists changes via on_change_cw_wpm_presets.
+        self._cw_wpm_presets: list[int] = [24, 20]
+        self._cw_presets_enabled = True
+        self.on_change_cw_wpm_presets: Callable[[list[int], bool], None] | None = None
         # "Restore after sending" bookkeeping: the radio's own speed to restore to,
         # and the pending restore task (cancelled/rescheduled across rapid sends).
         self._cw_restore_wpm: int | None = None
@@ -944,6 +952,15 @@ class MainWindow(QMainWindow):
         self._wpm_spin.valueChanged.connect(self._on_wpm_spin_changed)
         hbox.addWidget(self._wpm_spin)
 
+        # Quick WPM presets: click a button to set the macro speed; right-click to
+        # edit/delete; the + adds one. The whole strip hides when presets are off.
+        self._presets_bar = QWidget()
+        self._presets_box = QHBoxLayout(self._presets_bar)
+        self._presets_box.setContentsMargins(0, 0, 0, 0)
+        self._presets_box.setSpacing(3)
+        hbox.addWidget(self._presets_bar)
+        self._rebuild_cw_presets()
+
         # Live CW keyboard: sends as you type, Enter clears. Kept out of
         # _entry_fields so Space/Tab/Enter behave as text + clear (not field nav).
         self._cw_kbd_sent = ""  # text already streamed to the keyer this line
@@ -1013,6 +1030,92 @@ class MainWindow(QMainWindow):
     def _on_kbd_wpm_spin_changed(self, value: int) -> None:
         """The keyboard WPM spin box changed."""
         self._set_kbd_wpm(value)
+
+    # --- CW WPM presets (quick-speed buttons on the CW bar) --- #
+    def set_cw_wpm_presets(self, presets: list[int], enabled: bool) -> None:
+        """Set the preset list + feature switch from app state (no persistence)."""
+        self._cw_wpm_presets = normalize_wpm_presets(presets)
+        self._cw_presets_enabled = bool(enabled)
+        if hasattr(self, "_presets_bar"):
+            self._rebuild_cw_presets()
+
+    def _save_cw_presets(self) -> None:
+        """Persist the current preset list + switch via the app callback."""
+        if self.on_change_cw_wpm_presets is not None:
+            self.on_change_cw_wpm_presets(list(self._cw_wpm_presets), self._cw_presets_enabled)
+
+    def _rebuild_cw_presets(self) -> None:
+        """Repopulate the preset strip from ``self._cw_wpm_presets`` (+ add button)."""
+        while self._presets_box.count():
+            item = self._presets_box.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        for wpm in self._cw_wpm_presets:
+            btn = QPushButton(str(wpm))
+            btn.setMinimumHeight(32)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # keep Tab on the QSO fields
+            btn.setToolTip(f"Set CW speed to {wpm} WPM (right-click to edit/delete)")
+            btn.clicked.connect(lambda _checked=False, w=wpm: self._set_wpm(w))
+            btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            btn.customContextMenuRequested.connect(
+                lambda _pos, w=wpm, b=btn: self._show_preset_menu(w, b)
+            )
+            self._presets_box.addWidget(btn)
+        add = QPushButton("+")
+        add.setMinimumHeight(32)
+        add.setFixedWidth(32)
+        add.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        add.setToolTip("Add a CW WPM preset")
+        add.clicked.connect(self._add_cw_preset)
+        self._presets_box.addWidget(add)
+        self._presets_bar.setVisible(self._cw_presets_enabled)
+
+    def _show_preset_menu(self, wpm: int, anchor: QPushButton) -> None:
+        menu = QMenu(self)
+        menu.addAction("Change…", lambda: self._edit_cw_preset(wpm))
+        menu.addAction("Delete", lambda: self._delete_cw_preset(wpm))
+        menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+
+    def _add_cw_preset(self) -> None:
+        value, ok = QInputDialog.getInt(
+            self, "Add CW WPM Preset", "Speed (WPM):", 20, WPM_MIN, WPM_MAX
+        )
+        if not ok:
+            return
+        wpm = clamp_wpm(value)
+        if wpm not in self._cw_wpm_presets:
+            self._cw_wpm_presets.append(wpm)
+            self._save_cw_presets()
+            self._rebuild_cw_presets()
+
+    def _edit_cw_preset(self, wpm: int) -> None:
+        value, ok = QInputDialog.getInt(
+            self, "Change CW WPM Preset", "Speed (WPM):", wpm, WPM_MIN, WPM_MAX
+        )
+        if not ok:
+            return
+        new = clamp_wpm(value)
+        self._cw_wpm_presets = normalize_wpm_presets(
+            [new if p == wpm else p for p in self._cw_wpm_presets]
+        )
+        self._save_cw_presets()
+        self._rebuild_cw_presets()
+
+    def _delete_cw_preset(self, wpm: int) -> None:
+        self._cw_wpm_presets = [p for p in self._cw_wpm_presets if p != wpm]
+        self._save_cw_presets()
+        self._rebuild_cw_presets()
+
+    def _edit_cw_presets(self) -> None:
+        """Radio menu → manage presets and toggle the whole feature on/off."""
+        from partyhams.ui.cw_presets_dialog import CwPresetsDialog
+
+        dialog = CwPresetsDialog(self._cw_wpm_presets, self._cw_presets_enabled, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._cw_wpm_presets, self._cw_presets_enabled = dialog.settings()
+            self._save_cw_presets()
+            self._rebuild_cw_presets()
 
     # --- CW keyer-speed ownership modes (Radio menu) --- #
     def _build_cw_speed_menu(self, radio_menu) -> None:
@@ -1446,6 +1549,9 @@ class MainWindow(QMainWindow):
             "Choose how to read the rig (Hamlib, FlexRadio, Icom CI-V/LAN) or stay manual"
         )
         self._build_cw_speed_menu(radio_menu)
+        radio_menu.addAction("CW WPM Presets…", self._edit_cw_presets).setStatusTip(
+            "Add, change, or remove the quick CW speed buttons — or turn them off entirely"
+        )
 
         self._build_wsjtx_menu()
 

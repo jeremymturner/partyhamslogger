@@ -23,6 +23,15 @@ main window), so F2 sends the right thing in each context.
   (clear the entry row). A **CW speed (WPM)** setting controls sending speed.
 - **Phone** — a path to a `.wav` file that is played as your voice message.
 
+## CW WPM presets
+
+In CW mode the speed bar shows quick **WPM preset** buttons (seeded with 24 and
+20) between the CW speed box and the live keyboard sender. Click one to jump the
+macro speed to that value. **Right-click** a preset to change or delete it, and
+use the **+** button to add another. Manage the full list — or turn the whole
+feature off — from **Radio → CW WPM Presets…**; with presets disabled the
+buttons and the **+** are hidden entirely.
+
 ## ESM (Enter Sends Messages)
 
 Toggle **Macros → ESM**. With ESM on, Enter advances through the natural
