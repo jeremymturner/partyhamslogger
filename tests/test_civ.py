@@ -7,6 +7,7 @@ from fake_civ import FakeCivSerial
 from partyhams.core.models import Mode
 from partyhams.radio.civ_protocol import (
     CIV_ADDR_IC705,
+    CIV_ADDR_IC7300MK2,
     CIV_ADDR_IC7610,
     Frame,
     bcd_to_freq,
@@ -106,3 +107,27 @@ def test_ic7610_has_sub_receiver():
     r7610 = IcomCIV("/dev/fake", civ_address=CIV_ADDR_IC7610)
     assert not r705.supports(Capability.SUB_RECEIVER)
     assert r7610.supports(Capability.SUB_RECEIVER)
+
+
+async def test_ic7300mk2_serial():
+    # The IC-7300 MK2 defaults to CI-V address 0xB6 (manual p.58); the existing
+    # serial driver handles it with no protocol changes — only the address differs.
+    assert CIV_ADDR_IC7300MK2 == 0xB6
+    fake = FakeCivSerial(freq=14_074_000, mode=0x03, civ_address=CIV_ADDR_IC7300MK2)
+    radio = IcomCIV("/dev/fake", civ_address=CIV_ADDR_IC7300MK2, serial_factory=lambda: fake)
+    await radio.connect()
+
+    state = await radio.read_state()
+    assert state.freq_hz == 14_074_000
+    assert state.mode is Mode.CW
+    assert "IC-7300 MK2" in radio.description()
+
+    await radio.set_frequency(7_030_000)
+    assert fake.freq == 7_030_000
+
+    # The single-receiver MK2 must not claim the IC-7610's sub-receiver.
+    from partyhams.radio.base import Capability
+
+    assert not radio.supports(Capability.SUB_RECEIVER)
+
+    await radio.disconnect()

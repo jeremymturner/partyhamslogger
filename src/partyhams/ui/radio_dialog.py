@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 # Radio kinds that connect directly to the rig over the network (Icom native LAN).
-_LAN_KINDS = ("icom705-lan", "icom7610-lan")
+_LAN_KINDS = ("icom705-lan", "icom7610-lan", "icom7300mk2-lan")
 
 
 class _DiscoverWorker(QThread):
@@ -70,8 +70,10 @@ class RadioDialog(QDialog):
         self._radio.addItem("FlexRadio (native)", "flex")
         self._radio.addItem("Icom IC-705 (CI-V serial)", "icom705")
         self._radio.addItem("Icom IC-7610 (CI-V serial)", "icom7610")
+        self._radio.addItem("Icom IC-7300 MK2 (CI-V serial)", "icom7300mk2")
         self._radio.addItem("Icom IC-705 (LAN / Ethernet)", "icom705-lan")
         self._radio.addItem("Icom IC-7610 (LAN / Ethernet)", "icom7610-lan")
+        self._radio.addItem("Icom IC-7300 MK2 (LAN / Ethernet)", "icom7300mk2-lan")
         self._conn = QLineEdit()
         self._conn.setEnabled(False)
         self._user = QLineEdit()
@@ -164,7 +166,7 @@ class RadioDialog(QDialog):
             self._conn.setPlaceholderText("rigctld host:port (default 127.0.0.1:4532)")
         elif is_flex:
             self._conn.setPlaceholderText("radio IP (blank = auto-discover)")
-        elif kind in ("icom705", "icom7610"):
+        elif kind in ("icom705", "icom7610", "icom7300mk2"):
             self._conn.setPlaceholderText("serial port (e.g. /dev/cu.usbmodem…)")
         elif is_lan:
             self._conn.setPlaceholderText("radio IP or hostname (Network function must be On)")
