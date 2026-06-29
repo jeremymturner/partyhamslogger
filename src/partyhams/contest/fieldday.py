@@ -28,6 +28,7 @@ from partyhams.contest.base import (
     ScoreSummary,
     _macros,
 )
+from partyhams.contest.fd_bonus import BONUS_SELECTIONS_KEY, bonus_total
 from partyhams.contest.registry import register
 from partyhams.contest.sections import ARRL_SECTIONS, is_valid_section
 from partyhams.core.models import QSO, ModeGroup
@@ -160,12 +161,24 @@ class FieldDay(ContestDefinition):
             return raw
         return PowerCategory.from_key(str(raw))
 
+    def bonus_points(self, config: ContestConfig) -> int:
+        """Total claimed bonus points.
+
+        Prefers the itemised selections in ``config.extra['fd_bonus']`` (entered
+        via the Field Day summary dialog); falls back to a plain aggregate in
+        ``config.extra['bonus_points']`` for logs created before itemisation.
+        """
+        selections = config.extra.get(BONUS_SELECTIONS_KEY)
+        if isinstance(selections, dict):
+            return bonus_total(selections)
+        return int(config.extra.get("bonus_points", 0))
+
     def score(self, qsos: Iterable[QSO], config: ContestConfig) -> ScoreSummary:
         qsos = list(qsos)
         base = super().score(qsos, config)  # qso_count + qso_points (no mults)
 
         power = self.power_category(config)
-        bonus = int(config.extra.get("bonus_points", 0))
+        bonus = self.bonus_points(config)
         total = base.qso_points * power.multiplier + bonus
 
         # Per band+mode breakdown for the score window.

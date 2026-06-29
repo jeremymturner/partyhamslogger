@@ -19,10 +19,11 @@ from pathlib import Path
 
 from partyhams.contest import get as get_contest
 from partyhams.contest.base import ContestConfig, ContestDefinition, ScoreSummary
+from partyhams.contest.fd_bonus import BONUS_SELECTIONS_KEY
 from partyhams.core.clock import new_station_id, new_uuid
 from partyhams.core.models import QSO, Mode, ModeGroup, mode_group_for, utcnow
 from partyhams.db.store import SqliteLog
-from partyhams.export import write_adif, write_cabrillo
+from partyhams.export import write_adif, write_cabrillo, write_fieldday_summary
 from partyhams.net.engine import SyncEngine
 from partyhams.net.protocol import Chat
 from partyhams.net.transport import MulticastTransport, NullTransport
@@ -681,6 +682,19 @@ class LogSession:
         return write_cabrillo(
             self.engine.log.qsos(), self.config, self.contest, self.score(), operators
         )
+
+    def export_fieldday_summary(self) -> str:
+        """Render the ARRL Field Day summary sheet (the figures the operator reads
+        into the Field Day web app). Only meaningful for the Field Day contest."""
+        operators = {q.operator for q in self.engine.log.qsos()}
+        return write_fieldday_summary(
+            self.engine.log.qsos(), self.config, self.contest, self.score(), operators
+        )
+
+    def fd_summary_info_entered(self) -> bool:
+        """True once the operator has filled in the Field Day summary info (bonus
+        points + participants) via the dialog. Drives the export prompt."""
+        return BONUS_SELECTIONS_KEY in self.config.extra
 
 
 def _assemble(
