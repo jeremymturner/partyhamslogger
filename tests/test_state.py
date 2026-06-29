@@ -41,6 +41,17 @@ def test_cw_speed_mode_round_trip(tmp_path):
     assert load_state(path).cw_speed_mode == "restore"
 
 
+def test_cw_presets_round_trip(tmp_path):
+    path = tmp_path / "state.json"
+    defaults = load_state(path)
+    assert defaults.cw_wpm_presets == [24, 20]  # seeded defaults
+    assert defaults.cw_presets_enabled is True
+    save_state(AppState(cw_wpm_presets=[35, 18, 13], cw_presets_enabled=False), path)
+    loaded = load_state(path)
+    assert loaded.cw_wpm_presets == [35, 18, 13]
+    assert loaded.cw_presets_enabled is False
+
+
 def test_recent_logs_round_trip(tmp_path):
     path = tmp_path / "state.json"
     state = AppState()

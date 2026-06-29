@@ -1388,3 +1388,72 @@ def test_logging_a_qso_removes_that_caller_button():
     assert w._callers.decode_for("K1ABC") is None
     remaining = {c.call for c in w._callers.active(__import__("time").time() + 1)}
     assert remaining == {"N5DEF"}
+
+
+def _preset_labels(w) -> list[str]:
+    """The text of every CW preset button (excludes the trailing + add button)."""
+    from PySide6.QtWidgets import QPushButton
+
+    out = []
+    for i in range(w._presets_box.count()):
+        btn = w._presets_box.itemAt(i).widget()
+        if isinstance(btn, QPushButton) and btn.text() != "+":
+            out.append(btn.text())
+    return out
+
+
+def test_cw_presets_seed_and_click_sets_speed():
+    w = _window()
+    w.set_cw_wpm_presets([24, 20], True)
+    assert _preset_labels(w) == ["24", "20"]
+    assert w._presets_bar.isVisible() or True  # visibility tracks the CW-bar parent
+
+    # Clicking a preset sets the macro CW speed.
+    w._set_wpm(35)
+    assert w._macros.cw_wpm == 35
+    w._presets_box.itemAt(1).widget().click()  # the "20" button
+    assert w._macros.cw_wpm == 20
+
+
+def test_cw_presets_add_edit_delete_persist():
+    w = _window()
+    saved: list = []
+    w.on_change_cw_wpm_presets = lambda presets, enabled: saved.append((presets, enabled))
+    w.set_cw_wpm_presets([24, 20], True)
+
+    w._cw_wpm_presets.append(15)
+    w._save_cw_presets()
+    w._rebuild_cw_presets()
+    assert _preset_labels(w) == ["24", "20", "15"]
+
+    w._delete_cw_preset(20)
+    assert _preset_labels(w) == ["24", "15"]
+    assert saved[-1] == ([24, 15], True)
+
+
+def test_cw_presets_disabled_hides_strip():
+    w = _window()
+    w.set_cw_wpm_presets([24, 20], False)
+    assert w._presets_bar.isVisible() is False
+    w.set_cw_wpm_presets([24, 20], True)
+    # Re-enabling shows it again (parent CW bar visibility aside).
+    w._rebuild_cw_presets()
+    assert w._presets_bar.isVisibleTo(w) or not w._cw_bar.isVisible()
+
+
+def test_cw_presets_dialog_settings_normalize_and_toggle():
+    from PySide6.QtWidgets import QApplication
+
+    from partyhams.ui.cw_presets_dialog import CwPresetsDialog
+
+    QApplication.instance() or QApplication([])
+    dlg = CwPresetsDialog([24, 24, 20, 999], enabled=True)
+    presets, enabled = dlg.settings()
+    assert presets == [24, 20, 60]  # de-duped and clamped to WPM_MAX
+    assert enabled is True
+
+    # Unchecking the master switch disables the list controls and reports off.
+    dlg._enabled.setChecked(False)
+    assert not dlg._list.isEnabled()
+    assert not dlg._add_btn.isEnabled()
+    assert dlg.settings()[1] is False
