@@ -7,6 +7,7 @@ from partyhams.export.adif import (
     write_adif,
 )
 from partyhams.export.cabrillo import write_cabrillo
+from partyhams.export.fieldday_summary import write_fieldday_summary
 
 __all__ = [
     "adif_to_mode",
@@ -14,4 +15,5 @@ __all__ = [
     "timestamped_adif_name",
     "write_adif",
     "write_cabrillo",
+    "write_fieldday_summary",
 ]

@@ -1532,6 +1532,11 @@ class MainWindow(QMainWindow):
         adif_mine.setStatusTip("Only the QSOs this station logged — for a personal submission")
         cabrillo = logs_menu.addAction("Export Cabrillo…", self._export_cabrillo)
         cabrillo.setShortcut(QKeySequence(sc.EXPORT_CABRILLO))
+        if self.session.contest.id == "arrl-field-day":
+            fd_info = logs_menu.addAction("Field Day Summary Info…", self._edit_fd_summary)
+            fd_info.setStatusTip("Enter participants, club, and bonus points for the summary sheet")
+            fd_summary = logs_menu.addAction("Export Field Day Summary…", self._export_fd_summary)
+            fd_summary.setStatusTip("Summary sheet of figures to enter in the Field Day web app")
         logs_menu.addAction("Auto-export…", self._edit_autoexport)
         logs_menu.addAction("Open Log Folder", self._open_log_folder)
         logs_menu.addSeparator()
@@ -2740,6 +2745,49 @@ class MainWindow(QMainWindow):
         if path:
             Path(path).write_text(self.session.export_cabrillo())
             self.statusBar().showMessage(f"Exported Cabrillo to {path}", 4000)
+
+    def _edit_fd_summary(self) -> bool:
+        """Open the Field Day summary-info dialog (participants, club, bonuses) and
+        persist the result. Returns True if the operator accepted it."""
+        from partyhams.ui.fd_summary_dialog import FieldDaySummaryDialog
+
+        dialog = FieldDaySummaryDialog(self.session.config.extra, parent=self)
+        self._fd_summary_dialog = dialog  # keep alive while open
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        self.session.update_config(
+            my_call=self.session.config.my_call,
+            operator=self.session.engine.operator,
+            sent_exchange=self.session.config.sent_exchange,
+            extra=dialog.settings(),
+        )
+        self.refresh()
+        self.statusBar().showMessage("Field Day summary info saved", 3000)
+        return True
+
+    def _export_fd_summary(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        # Prompt for the supplementary info if it's never been filled in, so the
+        # exported sheet is complete (bonus points, participants, …).
+        if not self.session.fd_summary_info_entered():
+            choice = QMessageBox.question(
+                self,
+                "Field Day Summary",
+                "Summary info (bonus points, participants) hasn't been entered yet.\n"
+                "Fill it in now so the summary sheet is complete?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if choice == QMessageBox.StandardButton.Yes and not self._edit_fd_summary():
+                return  # operator cancelled the info dialog — abort the export
+        suggested = f"{self.session.config.my_call.upper() or 'fieldday'}-summary.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Field Day Summary", suggested, "Text (*.txt)"
+        )
+        if path:
+            Path(path).write_text(self.session.export_fieldday_summary())
+            self.statusBar().showMessage(f"Exported Field Day summary to {path}", 4000)
 
     def _edit_qrz(self) -> None:
         from partyhams.ui.qrz_dialog import QrzDialog
