@@ -4,14 +4,25 @@ from __future__ import annotations
 
 from partyhams.app.macros import (
     DEFAULT_WPM,
+    WPM_MAX,
+    WPM_MIN,
     MacroSet,
     bank_key,
     esm_step,
     expand,
     load_macros,
+    normalize_wpm_presets,
     save_macros,
 )
 from partyhams.contest import get
+
+
+def test_normalize_wpm_presets_clamps_and_dedupes():
+    # Out-of-range values clamp; duplicates drop; order is preserved.
+    assert normalize_wpm_presets([24, 20]) == [24, 20]
+    assert normalize_wpm_presets([1000, -5]) == [WPM_MAX, WPM_MIN]
+    assert normalize_wpm_presets([24, 24, 20]) == [24, 20]
+    assert normalize_wpm_presets([]) == []
 
 
 def test_expand_substitutes_variables():

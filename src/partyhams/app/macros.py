@@ -51,6 +51,19 @@ def clamp_wpm(wpm: int) -> int:
     return max(WPM_MIN, min(WPM_MAX, int(wpm)))
 
 
+def normalize_wpm_presets(values: list[int]) -> list[int]:
+    """Clamp each CW WPM preset into range and drop duplicates, preserving order."""
+    out: list[int] = []
+    for value in values:
+        try:
+            wpm = clamp_wpm(value)
+        except (TypeError, ValueError):
+            continue
+        if wpm not in out:
+            out.append(wpm)
+    return out
+
+
 def normalize_cw_speed_mode(mode: str | None) -> str:
     """Coerce a persisted/selected CW-speed mode to a known value (else default)."""
     return mode if mode in CW_SPEED_MODES else CW_SPEED_DEFAULT
