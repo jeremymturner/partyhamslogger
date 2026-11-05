@@ -38,7 +38,7 @@ jobs:
         include:
           - os: windows-latest
             label: windows-x64
-          - os: macos-14          # Apple Silicon
+          - os: macos-15          # Apple Silicon
             label: macos-arm64
           - os: ubuntu-latest
             label: linux-x64
