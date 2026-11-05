@@ -150,7 +150,7 @@ class IcomTCP(CivRadio):
                         self._reader.readuntil(bytes([END])),
                         timeout=remaining,
                     )
-                except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+                except (TimeoutError, asyncio.IncompleteReadError):
                     _log.debug("_transact: read error waiting for cmd=0x%02X", response_cmd or 0)
                     return None
                 _log.debug("_transact raw rx: %s", raw.hex())
