@@ -24,11 +24,16 @@ from partyhams.core.clock import new_station_id, new_uuid
 from partyhams.core.models import QSO, Mode, ModeGroup, mode_group_for, utcnow
 from partyhams.db.store import SqliteLog
 from partyhams.export import write_adif, write_cabrillo, write_fieldday_summary
+from partyhams.hunters import HUNTERS_DB, Hunter, HunterRecord, HunterStore
 from partyhams.net.engine import SyncEngine
 from partyhams.net.protocol import Chat
 from partyhams.net.transport import MulticastTransport, NullTransport
 
 RATE_WINDOWS_MIN = (15, 30, 60)  # QSO-rate windows shown in the network panel
+
+#: Contests that keep a hunter roster (see :mod:`partyhams.hunters`). Both are
+#: casual, callsign-and-name activities where you work the same people again.
+ROSTER_CONTESTS: frozenset[str] = frozenset({"pota", "general"})
 
 # Presence thresholds (seconds since a peer's last StationStatus). A station
 # broadcasts status every 3s, so "stale" dims it after a few missed beats,
@@ -52,23 +57,32 @@ class LogSession:
         config: ContestConfig,
         engine: SyncEngine,
         store: SqliteLog,
+        hunters: HunterStore | None = None,
     ) -> None:
         self.contest = contest
         self.config = config
         self.engine = engine
         self.store = store
+        #: Hunter roster (None for contests that don't use one — see
+        #: :mod:`partyhams.hunters`). Populated as QSOs are logged. POTA fills it
+        #: with the regulars who hunt the activation; General logging shares the
+        #: same roster so an everyday contact with someone you met at a park keeps
+        #: their name and count in one place. Field Day has no use for it.
+        self.hunters = hunters if contest.id in ROSTER_CONTESTS else None
         self._listeners: list[Callable[[], None]] = []
         self._roster_listeners: list[Callable[[], None]] = []
         self._chat_listeners: list[Callable[[dict], None]] = []
         self._chat_log: list[dict] = []
         self._chat_seen: set[str] = set()  # uuids already in _chat_log (dedup)
         self._pending_broadcast: dict[str, Chat] = {}  # posted, awaiting broadcast
+        self._pending_hunters: list[HunterRecord] = []  # applied, awaiting broadcast
         self._dupe_keys: set[tuple] = set()
         self._mult_keys: set[tuple[str, str]] = set()
 
         engine.on_qso = self._on_applied
         engine.on_status = self._on_roster_change
         engine.on_chat = self._on_chat
+        engine.on_hunter = self._on_hunter
         engine.on_clock_off = self._on_clock_off
         # Load the persisted log into the in-memory merge, clock, and indexes.
         for qso in store.all(include_deleted=True):
@@ -91,6 +105,13 @@ class LogSession:
                 )
             )
         self._chat_log.sort(key=lambda e: (e["ts"], e["uuid"]))
+        # Replay the persisted hunter roster so the engine can serve it to a
+        # peer requesting a full sync, and so our own lamport clock never
+        # reissues a value an existing record already used.
+        if self.hunters is not None:
+            for record in self.hunters.records():
+                engine.apply_hunter(record)
+                engine.clock.update(record.lamport)
 
     # ------------------------------------------------------------------ #
     # listeners / lifecycle
@@ -447,6 +468,7 @@ class LogSession:
         rst_rcvd: str = "599",
         timestamp: datetime | None = None,
         uuid: str | None = None,
+        comment: str = "",
     ) -> QSO:
         """Log a QSO locally and synchronously (UI updates immediately).
 
@@ -459,7 +481,7 @@ class LogSession:
             rs, rr = rst_sent or default_rst(mode), rst_rcvd
         else:
             rs = rr = ""  # contests like Field Day exchange no signal report
-        return self.engine.record(
+        qso = self.engine.record(
             call=call,
             freq_hz=freq_hz,
             mode=mode,
@@ -468,7 +490,10 @@ class LogSession:
             rst_rcvd=rr,
             timestamp=timestamp,
             uuid=uuid,
+            comment=comment,
         )
+        self._note_hunter(qso)
+        return qso
 
     def delete_qso(self, qso: QSO) -> QSO:
         """Tombstone a QSO (locally + CRDT). Returns the tombstone; broadcast it
@@ -486,6 +511,7 @@ class LogSession:
         rst_sent: str | None = None,
         rst_rcvd: str | None = None,
         timestamp: datetime | None = None,
+        comment: str | None = None,
     ) -> QSO:
         """Edit a QSO's details in place (same uuid, fresh lamport). Returns the
         amended QSO; broadcast it with :meth:`broadcast`."""
@@ -503,12 +529,14 @@ class LogSession:
             rst_sent=rs,
             rst_rcvd=rr,
             timestamp=timestamp or qso.timestamp,
+            comment=qso.comment if comment is None else comment,
             deleted=False,
         )
         return self.engine.amend(amended)
 
     async def broadcast(self, qso: QSO) -> None:
         await self.engine.broadcast(qso)
+        await self.broadcast_hunters()
 
     async def request_full_log(self) -> None:
         """Ask every networked station to send its entire log."""
@@ -519,6 +547,102 @@ class LogSession:
         qso = self.record_qso(**kwargs)
         await self.broadcast(qso)
         return qso
+
+    # ------------------------------------------------------------------ #
+    # POTA hunter roster
+    # ------------------------------------------------------------------ #
+    def _note_hunter(self, qso: QSO) -> None:
+        """Add or increment the roster entry for a just-logged POTA QSO.
+
+        A no-op for every non-POTA contest (``self.hunters`` is ``None`` there).
+        The name is left empty; the UI fills it in from QRZ once per new call via
+        :meth:`set_hunter_name`. Records are queued for broadcast rather than
+        sent here, so logging stays synchronous and never waits on the network.
+        """
+        if self.hunters is None or qso.deleted:
+            return
+        record = self.hunters.worked(
+            call=qso.call,
+            station_id=self.engine.station_id,
+            lamport=self.engine.clock.tick(),
+            freq_hz=qso.freq_hz,
+            band=qso.band_label,
+            mode=qso.mode.value,
+            when=qso.timestamp,
+        )
+        self.engine.apply_hunter(record)
+        self._pending_hunters.append(record)
+
+    def set_hunter_name(self, call: str, name: str) -> HunterRecord | None:
+        """Attach the operator's name to a roster entry (from a QRZ lookup).
+
+        Returns the updated record — broadcast it with :meth:`broadcast_hunters`
+        — or ``None`` if there is nothing to change.
+        """
+        if self.hunters is None:
+            return None
+        record = self.hunters.set_name(
+            call, self.engine.station_id, self.engine.clock.tick(), name
+        )
+        if record is None:
+            return None
+        self.engine.apply_hunter(record)
+        self._pending_hunters.append(record)
+        self._emit()
+        return record
+
+    def edit_hunter(self, old_call: str, new_call: str, name: str) -> list[HunterRecord]:
+        """Correct a roster entry's callsign and/or operator name.
+
+        Returns the records queued for broadcast (send them with
+        :meth:`broadcast_hunters`); empty when nothing changed or the current log
+        is not a POTA log. See :meth:`HunterStore.edit` for the merge semantics.
+        """
+        if self.hunters is None:
+            return []
+        changed = self.hunters.edit(
+            old_call=old_call,
+            new_call=new_call,
+            name=name,
+            station_id=self.engine.station_id,
+            next_lamport=self.engine.clock.tick,
+        )
+        if not changed:
+            return []
+        if new_call.strip().upper() != old_call.strip().upper():
+            self.engine.drop_hunter(old_call.strip().upper())
+        for record in changed:
+            self.engine.apply_hunter(record)
+            self._pending_hunters.append(record)
+        self._emit()
+        return changed
+
+    async def broadcast_hunters(self) -> None:
+        """Send any roster records applied locally but not yet sent to peers."""
+        if not self._pending_hunters:
+            return
+        pending, self._pending_hunters = self._pending_hunters, []
+        for record in pending:
+            await self.engine.broadcast_hunter(record)
+
+    def _on_hunter(self, record: HunterRecord) -> None:
+        """Persist a roster record that arrived from a peer."""
+        if self.hunters is None:
+            return
+        if self.hunters.apply(record):
+            self._emit()
+
+    def hunter(self, call: str) -> Hunter | None:
+        """The merged roster entry for ``call``, or ``None`` if never worked."""
+        return self.hunters.get(call) if self.hunters is not None else None
+
+    def hunters_by_worked(self) -> list[Hunter]:
+        """The whole roster, most-worked first."""
+        return self.hunters.all() if self.hunters is not None else []
+
+    def hunter_needs_name(self, call: str) -> bool:
+        """True if ``call`` is on the roster and nobody has a name for it yet."""
+        return self.hunters is not None and self.hunters.needs_name(call)
 
     # ------------------------------------------------------------------ #
     # exchange parsing / validation
@@ -704,13 +828,23 @@ def _assemble(
     network: str | None,
     store: SqliteLog,
     station_id: str,
+    hunters_db: str | Path | None = HUNTERS_DB,
 ) -> LogSession:
     if network:
         transport: NullTransport | MulticastTransport = MulticastTransport(network, station_id)
     else:
         transport = NullTransport("offline", station_id)
     engine = SyncEngine(transport, operator=operator or config.my_call, call=config.my_call)
-    return LogSession(contest=contest, config=config, engine=engine, store=store)
+    # The hunter roster is install-wide and POTA-only: open it only for a POTA
+    # log so no other contest pays for it (LogSession also gates on contest.id).
+    hunters = (
+        HunterStore(hunters_db)
+        if hunters_db is not None and contest.id in ROSTER_CONTESTS
+        else None
+    )
+    return LogSession(
+        contest=contest, config=config, engine=engine, store=store, hunters=hunters
+    )
 
 
 def _write_meta(
@@ -743,6 +877,7 @@ def build_session(
     bonus_points: int = 0,
     extra: dict[str, object] | None = None,
     db_path: str | Path = ":memory:",
+    hunters_db: str | Path | None = HUNTERS_DB,
 ) -> LogSession:
     """Create a new log + session and persist its config into the log file.
 
@@ -757,7 +892,7 @@ def build_session(
     store = SqliteLog(db_path)
     station_id = new_station_id()
     _write_meta(store, contest_id, config, operator, network, station_id)
-    return _assemble(contest, config, operator, network, store, station_id)
+    return _assemble(contest, config, operator, network, store, station_id, hunters_db)
 
 
 def summarize_log(path: str | Path) -> dict | None:
@@ -826,7 +961,9 @@ def list_logs(logs_dir: Path | None = None) -> list[dict]:
     return out
 
 
-def open_session(db_path: str | Path) -> LogSession:
+def open_session(
+    db_path: str | Path, hunters_db: str | Path | None = HUNTERS_DB
+) -> LogSession:
     """Reopen an existing log file, restoring its contest + station config."""
     store = SqliteLog(db_path)
     meta = store.all_meta()
@@ -846,4 +983,4 @@ def open_session(db_path: str | Path) -> LogSession:
     if not station_id:
         station_id = new_station_id()
         store.set_meta("station_id", station_id)
-    return _assemble(contest, config, operator, network, store, station_id)
+    return _assemble(contest, config, operator, network, store, station_id, hunters_db)
