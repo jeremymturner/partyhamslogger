@@ -7,15 +7,27 @@ name: Build & Release
 #   - Push a tag like v0.1.0  -> builds all platforms AND publishes a release.
 #   - Run manually (workflow_dispatch) -> builds all platforms, uploads the
 #     bundles as workflow artifacts only (no release is created).
+#   - Run manually with the `tag` input (e.g. v0.1.0) -> builds all platforms,
+#     then creates that tag on the run's commit AND publishes the release. Handy
+#     when you can't push a tag (e.g. from a phone).
 
 on:
   push:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create & publish (e.g. v0.1.0). Leave empty to build only."
+        required: false
+        default: ""
 
 permissions:
   contents: write
+
+env:
+  # The release tag: the pushed tag, or the manual `tag` input (else the branch name).
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -32,6 +44,13 @@ jobs:
             label: linux-x64
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Validate tag input
+        if: ${{ inputs.tag != '' }}
+        shell: bash
+        run: |
+          [[ "${{ inputs.tag }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error::tag must look like vMAJOR.MINOR.PATCH"; exit 1; }
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -59,7 +78,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p out
-          tar czf "out/PartyHamsLogger-${{ github.ref_name }}-${{ matrix.label }}.tar.gz" \
+          tar czf "out/PartyHamsLogger-${{ env.RELEASE_TAG }}-${{ matrix.label }}.tar.gz" \
             -C dist PartyHamsLogger
 
       - name: Package bundle (macOS)
@@ -68,7 +87,7 @@ jobs:
           mkdir -p out
           # ditto preserves the .app bundle's symlinks and metadata (zip mangles them).
           ditto -c -k --keepParent dist/PartyHamsLogger.app \
-            "out/PartyHamsLogger-${{ github.ref_name }}-${{ matrix.label }}.zip"
+            "out/PartyHamsLogger-${{ env.RELEASE_TAG }}-${{ matrix.label }}.zip"
 
       - name: Package bundle (Windows)
         if: runner.os == 'Windows'
@@ -76,7 +95,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
           Compress-Archive -Path dist/PartyHamsLogger `
-            -DestinationPath "out/PartyHamsLogger-${{ github.ref_name }}-${{ matrix.label }}.zip"
+            -DestinationPath "out/PartyHamsLogger-${{ env.RELEASE_TAG }}-${{ matrix.label }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -87,7 +106,7 @@ jobs:
   release:
     name: Publish release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     runs-on: ubuntu-latest
     env:
       # Mapped here so the Discord step can gate on it (secrets aren't usable in `if`).
@@ -112,6 +131,8 @@ jobs:
         with:
           files: |
             artifacts/*
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           fail_on_unmatched_files: true
 
@@ -122,4 +143,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DISCORD_MENTION: ${{ vars.DISCORD_MENTION }}
-        run: python3 scripts/notify_discord.py --repo "${{ github.repository }}" --tag "${{ github.ref_name }}"
+        run: python3 scripts/notify_discord.py --repo "${{ github.repository }}" --tag "${{ env.RELEASE_TAG }}"
