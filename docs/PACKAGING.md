@@ -82,7 +82,7 @@ a.datas, ... )` — handy for distribution, slower to start.
 ## CI suggestion
 
 A GitHub Actions matrix over `windows-latest`, `macos-13` (Intel),
-`macos-14` (Apple Silicon), and `ubuntu-latest` running the matching
+`macos-15` (Apple Silicon), and `ubuntu-latest` running the matching
 `make package*` target, then uploading `dist/*` as release assets, gives you
 all artifacts from one tag push.
 

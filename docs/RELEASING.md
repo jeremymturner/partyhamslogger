@@ -68,6 +68,12 @@ by `make release`.
    git push origin v0.1.0
    ```
 
+### Releasing without pushing a tag (e.g. from a phone)
+
+After the version bump is on `main`, open **Actions → Build & Release → Run
+workflow**, enter the tag (e.g. `v0.1.0`) and run it. The workflow builds every
+platform, creates the tag on that commit, and publishes the release.
+
 ### What the script does
 
 1. Validates the tag looks like `vMAJOR.MINOR.PATCH` and matches
@@ -148,7 +154,7 @@ its own workflow.
 
 Because there's no cross-compilation, the natural automation is a GitHub Actions
 matrix — one runner per target OS/arch (`windows-latest`, `macos-13` Intel,
-`macos-14` Apple Silicon, `ubuntu-latest`) — each running the matching
+`macos-15` Apple Silicon, `ubuntu-latest`) — each running the matching
 `make release VERSION=$TAG RELEASE_ARGS="--target <t>"` (or just the build +
 `gh release upload`) into the tag that triggered the workflow. The first job to
 run `gh release create` makes the release; the rest upload into it. See the "CI
