@@ -10,9 +10,9 @@ PY    := $(VENV)/bin/python
 PIP   := $(VENV)/bin/pip
 STAMP := $(VENV)/.installed
 
-# Bootstrap interpreter for the venv — prefer a 3.12/3.13/3.14 (the system
+# Bootstrap interpreter for the venv — prefer a 3.12/3.13/3.14/3.15 (the system
 # python may be too old). Override with: make PYTHON=/path/to/python3.12 run
-PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3.13 2>/dev/null || command -v python3.14 2>/dev/null)
+PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3.13 2>/dev/null || command -v python3.14 2>/dev/null || command -v python3.15 2>/dev/null)
 
 .DEFAULT_GOAL := help
 
