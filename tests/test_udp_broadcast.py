@@ -159,9 +159,27 @@ def test_a_blank_host_falls_back_to_the_default():
     assert caster.host == "127.0.0.1"
 
 
-def test_an_unreachable_target_reports_instead_of_raising():
+def test_an_unreachable_target_reports_instead_of_raising(monkeypatch):
+    # Fail the send itself rather than relying on DNS: some resolvers (search
+    # domains, ISP/Pi-hole wildcards) happily resolve any made-up hostname.
+    class _UnreachableSocket:
+        def __init__(self, *args):
+            pass
+
+        def setsockopt(self, *args):
+            pass
+
+        def settimeout(self, *args):
+            pass
+
+        def sendto(self, data, addr):
+            raise OSError("Network is unreachable")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("partyhams.wsjtx.broadcast.socket.socket", _UnreachableSocket)
     caster = LogBroadcaster(enabled=True, host="203.0.113.0", port=1)
-    caster.host = "not a hostname at all"
     assert caster.send("<CALL:4>W1AW<EOR>") is False
     assert caster.last_error and "failed" in caster.last_error
 
