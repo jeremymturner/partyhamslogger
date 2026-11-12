@@ -3,7 +3,7 @@
 Both the serial (:class:`~partyhams.radio.icom_civ.IcomCIV`) and network
 (:class:`~partyhams.radio.icom_net.IcomNet`) Icom backends speak the *same*
 CI-V command set — they differ only in transport. This base captures the
-command/response logic (read freq+mode, set freq/mode, PTT, CW) on top of an
+command/response logic (read freq+mode, set freq/mode, PTT, CW, keyer speed) on top of an
 abstract :meth:`_transact`, so the two transports can't drift apart.
 
 A subclass must set ``civ_address`` and implement :meth:`_transact` (plus the
@@ -25,12 +25,16 @@ from partyhams.radio.civ_protocol import (
     CMD_SEND_CW,
     CMD_SET_FREQ,
     CMD_SET_MODE,
+    KEY_SPEED_MAX_WPM,
+    KEY_SPEED_MIN_WPM,
     SUB_KEYER_SPEED,
     bcd_to_freq,
     civ_to_mode,
+    cw_chunks,
     freq_to_bcd,
+    level_to_wpm,
     mode_to_civ,
-    wpm_to_level_bytes,
+    wpm_to_level,
 )
 
 
@@ -39,6 +43,14 @@ class CivRadio(Radio):
 
     #: The radio's CI-V address (IC-705 ``0xA4``, IC-7610 ``0x98``).
     civ_address: int = 0
+    keyer_wpm_range = (KEY_SPEED_MIN_WPM, KEY_SPEED_MAX_WPM)
+
+    # Bumped by stop_tx so a multi-piece send_cw stops between pieces.
+    _cw_generation = 0
+    # Consecutive polls with no keyer-speed reply; after a few, stop asking so a rig
+    # that won't answer 14 0C doesn't add a timeout to every poll.
+    _wpm_misses = 0
+    _WPM_MISS_LIMIT = 3
 
     @property
     def capabilities(self) -> Capability:
@@ -64,9 +76,20 @@ class CivRadio(Radio):
     async def read_state(self) -> RadioState:
         freq_payload = await self._transact(bytes([CMD_READ_FREQ]), response_cmd=CMD_READ_FREQ)
         mode_payload = await self._transact(bytes([CMD_READ_MODE]), response_cmd=CMD_READ_MODE)
+        if freq_payload is None and mode_payload is None:
+            # Silence on both reads means the link is gone (LAN session dropped, cable
+            # pulled, rig off). Raise so RadioPoller reconnects instead of showing 0 Hz.
+            raise OSError("no response from radio")
         freq = bcd_to_freq(freq_payload[1:6]) if freq_payload and len(freq_payload) >= 6 else 0
         mode = civ_to_mode(mode_payload[1]) if mode_payload and len(mode_payload) >= 2 else Mode.USB
-        return RadioState(freq_hz=freq, mode=mode)
+        return RadioState(freq_hz=freq, mode=mode, wpm=await self._poll_wpm())
+
+    async def _poll_wpm(self) -> int | None:
+        if self._wpm_misses >= self._WPM_MISS_LIMIT:
+            return None
+        wpm = await self.read_wpm()
+        self._wpm_misses = 0 if wpm is not None else self._wpm_misses + 1
+        return wpm
 
     async def set_frequency(self, freq_hz: int) -> None:
         await self._transact(bytes([CMD_SET_FREQ]) + freq_to_bcd(freq_hz), ack=True)
@@ -84,22 +107,41 @@ class CivRadio(Radio):
         # Fire-and-forget — no ACK wait.  Holding the lock for 1.5 s while waiting
         # for an ACK would block the polling loop and delay freq/mode updates.
         await self._transact(
-            bytes([CMD_LEVEL, SUB_KEYER_SPEED]) + wpm_to_level_bytes(wpm), expect=False
+            bytes([CMD_LEVEL, SUB_KEYER_SPEED]) + wpm_to_level(wpm), expect=False
         )
 
     async def send_cw(self, text: str, wpm: int | None = None) -> None:
+        # CI-V "send CW message" (0x17) + ASCII, keyed by the rig's own keyer. One
+        # command holds at most 30 characters, so longer text goes as several; the
+        # rig queues them. Set the speed first so the whole message goes at ``wpm``.
+        generation = self._cw_generation
         if wpm is not None:
-            # Must wait for ACK before sending the CW text — the IC-7300 MK2 TCP
-            # requires strict sequential cmd/response and ignores the CW frame if
-            # two commands arrive back-to-back without a read between them.
+            # Wait for the speed's ACK before the text: the IC-7300 MK2 over TCP
+            # ignores a CW frame that arrives back-to-back with another command.
             await self._transact(
-                bytes([CMD_LEVEL, SUB_KEYER_SPEED]) + wpm_to_level_bytes(wpm), ack=True
+                bytes([CMD_LEVEL, SUB_KEYER_SPEED]) + wpm_to_level(wpm), ack=True
             )
-        # CI-V "send CW message" (0x17) + ASCII; the radio keys it at its set speed.
-        await self._transact(bytes([CMD_SEND_CW]) + text.encode("ascii", "ignore"), expect=False)
+        for chunk in cw_chunks(text):
+            if self._cw_generation != generation:
+                return  # stop_tx (Esc) ran while we were sending — drop the rest
+            reply = await self._transact(bytes([CMD_SEND_CW]) + chunk, ack=True)
+            if reply is not None and reply[0] == ACK_NG:
+                raise OSError(f"radio rejected CW text {chunk.decode()!r}")
+
+    async def read_wpm(self) -> int | None:
+        reply = await self._transact(
+            bytes([CMD_LEVEL, SUB_KEYER_SPEED]), response_cmd=CMD_LEVEL
+        )
+        if reply is None or len(reply) < 4 or reply[1] != SUB_KEYER_SPEED:
+            return None
+        self._wpm_misses = 0
+        return level_to_wpm(reply[2:4])
+
 
     async def stop_tx(self) -> None:
-        # 0x17 0xFF cancels CW; then drop PTT — best effort.
+        # 0x17 0xFF cancels CW; then drop PTT — best effort. Bump the generation first
+        # so a send_cw still working through pieces doesn't send any more.
+        self._cw_generation += 1
         try:
             await self._transact(bytes([CMD_SEND_CW, 0xFF]), expect=False)
         except OSError:

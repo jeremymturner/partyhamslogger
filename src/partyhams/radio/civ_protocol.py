@@ -26,31 +26,11 @@ CMD_READ_MODE = 0x04
 CMD_SET_FREQ = 0x05
 CMD_SET_MODE = 0x06
 CMD_SEND_CW = 0x17
-CMD_PTT = 0x1C       # subcommand 0x00 = TX/RX
-CMD_LEVEL = 0x14     # read/set a level (keyer speed, RF power, …)
-SUB_KEYER_SPEED = 0x0C  # subcommand of CMD_LEVEL for CW keyer WPM
+CMD_PTT = 0x1C  # subcommand 0x00 = TX/RX
+CMD_LEVEL = 0x14  # read/set a level; subcommand selects which
+SUB_KEYER_SPEED = 0x0C  # keyer speed: level 0000 = 6 WPM … 0255 = 48 WPM
 ACK_OK = 0xFB
 ACK_NG = 0xFA
-
-# Keyer-speed level scale: CI-V maps 0–255 to the radio's physical WPM range.
-# Empirical calibration on IC-7300 MK2: level 85 → 20 WPM, level 113 → 24 WPM.
-# Solving the linear system gives min≈7.86, step≈1/7 WPM/level; rounding to
-# min=8, max=44 reproduces both calibration points to within one level.
-_CIV_WPM_MIN = 8
-_CIV_WPM_MAX = 44
-
-
-def wpm_to_level_bytes(wpm: int) -> bytes:
-    """Encode a WPM value as two BCD bytes for CI-V CMD_LEVEL / SUB_KEYER_SPEED.
-
-    The level is a 0–255 integer that the radio maps linearly to its WPM range
-    (6–60 WPM for IC-7300 family).  It is stored as 4-digit BCD across 2 bytes:
-    e.g. level 104 → b'\x01\x04' (hundreds=01, tens=0, units=4).
-    """
-    level = round(max(0, min(255, (wpm - _CIV_WPM_MIN) * 255 / (_CIV_WPM_MAX - _CIV_WPM_MIN))))
-    b0 = level // 100
-    b1 = ((level % 100) // 10 << 4) | (level % 10)
-    return bytes([b0, b1])
 
 # CI-V mode byte <-> our Mode
 _CIV_TO_MODE: dict[int, Mode] = {
@@ -121,7 +101,9 @@ def parse_frames(buffer: bytes) -> tuple[list[Frame], bytes]:
     while True:
         start = buf.find(PREAMBLE)
         if start < 0:
-            return frames, b""
+            # Keep a trailing lone 0xFE: it may be the first half of the next preamble,
+            # split across serial reads. Dropping it loses that whole frame.
+            return frames, buf[-1:] if buf.endswith(PREAMBLE[:1]) else b""
         end = buf.find(bytes([END]), start + 2)
         if end < 0:
             return frames, buf[start:]  # incomplete — keep for next read
@@ -129,3 +111,60 @@ def parse_frames(buffer: bytes) -> tuple[list[Frame], bytes]:
         if len(body) >= 3:
             frames.append(Frame(to_addr=body[0], from_addr=body[1], payload=body[2:]))
         buf = buf[end + 1 :]
+
+
+# --- CW keyer ------------------------------------------------------------- #
+KEY_SPEED_MIN_WPM = 6
+KEY_SPEED_MAX_WPM = 48
+#: Most characters one "send CW message" (0x17) command accepts.
+CW_MAX_CHARS = 30
+# What Icom's keyer can send via 0x17 ("^" joins the next two letters as a prosign).
+_CW_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/?.-,:'()=+\"@^ ")
+
+
+def _level_bcd(level: int) -> bytes:
+    """A 0–255 level as Icom's 2-byte big-endian BCD (e.g. 128 -> ``01 28``)."""
+    digits = f"{level:04d}"
+    return bytes([int(digits[0]) << 4 | int(digits[1]), int(digits[2]) << 4 | int(digits[3])])
+
+
+def _bcd_level(data: bytes) -> int:
+    return int(f"{data[0]:02x}{data[1]:02x}")
+
+
+def wpm_to_level(wpm: int) -> bytes:
+    """Keyer speed in WPM -> the 2-byte BCD level for ``14 0C`` (clamped 6–48)."""
+    wpm = max(KEY_SPEED_MIN_WPM, min(KEY_SPEED_MAX_WPM, int(wpm)))
+    span = KEY_SPEED_MAX_WPM - KEY_SPEED_MIN_WPM
+    return _level_bcd(round((wpm - KEY_SPEED_MIN_WPM) * 255 / span))
+
+
+def level_to_wpm(data: bytes) -> int:
+    """The 2-byte BCD level from a ``14 0C`` reply -> keyer speed in WPM."""
+    span = KEY_SPEED_MAX_WPM - KEY_SPEED_MIN_WPM
+    return KEY_SPEED_MIN_WPM + round(_bcd_level(data) * span / 255)
+
+
+def cw_chunks(text: str) -> list[bytes]:
+    """Split ``text`` into 0x17-sized pieces of characters the keyer can send.
+
+    Upper-cases, drops anything Icom's keyer can't send (which would otherwise NG
+    the whole command), and cuts at :data:`CW_MAX_CHARS`, preferring a space.
+    """
+    clean = "".join(c for c in text.upper() if c in _CW_CHARS)
+    chunks: list[bytes] = []
+    while clean:
+        if len(clean) <= CW_MAX_CHARS:
+            cut = len(clean)
+        else:
+            space = clean.rfind(" ", 1, CW_MAX_CHARS + 1)
+            cut = space if space > 0 else CW_MAX_CHARS
+            # Never split "^" from the two letters it joins into a prosign.
+            caret = clean.rfind("^", max(0, cut - 2), cut)
+            if caret > 0:
+                cut = caret
+        piece, clean = clean[:cut], clean[cut:]
+        if clean.startswith(" ") and len(piece) < CW_MAX_CHARS:
+            piece, clean = piece + " ", clean[1:]  # keep the word gap in this piece
+        chunks.append(piece.encode("ascii"))
+    return chunks

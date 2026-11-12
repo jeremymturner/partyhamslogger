@@ -25,20 +25,35 @@ class FakeCivSerial:
         self.ptt: int | None = None
         self.cw_sent: list[str] = []
         self.cw_stopped = False
+        self.key_level = b"\x01\x34"  # keyer speed level (0134 = 28 WPM)
         self.closed = False
         self._rx = bytearray()  # bytes the controller will read back
+        self.baudrate = 19200
+        # When set, the rig only understands this speed — anything else is line noise
+        # to it, so it never answers (like an IC-7610 pinned to CI-V USB 115200).
+        self.required_baud: int | None = None
 
     # pyserial-like API ------------------------------------------------- #
     def write(self, data: bytes) -> int:
+        if self.required_baud is not None and self.baudrate != self.required_baud:
+            return len(data)  # wrong speed: the rig hears garbage and stays silent
         frames, _ = parse_frames(bytes(data))
         for frame in frames:
-            self._handle(frame.payload)
+            if frame.to_addr == self.civ_address:  # a rig ignores other addresses
+                self._handle(frame.payload)
         return len(data)
 
     def read(self, n: int) -> bytes:
         out = bytes(self._rx[:n])
         del self._rx[:n]
         return out
+
+    @property
+    def in_waiting(self) -> int:
+        return len(self._rx)
+
+    def reset_input_buffer(self) -> None:
+        self._rx.clear()
 
     def close(self) -> None:
         self.closed = True
@@ -61,12 +76,19 @@ class FakeCivSerial:
         elif cmd == 0x1C:  # PTT
             self.ptt = payload[2]
             self._ack(True)
+        elif cmd == 0x14 and payload[1:2] == b"\x0c":  # keyer speed level
+            if len(payload) == 2:
+                self._reply(b"\x14\x0c" + self.key_level)
+            else:
+                self.key_level = payload[2:4]
+                self._ack(True)
         elif cmd == 0x17:  # send CW
             data = payload[1:]
             if data == b"\xff":
                 self.cw_stopped = True
             elif data:
                 self.cw_sent.append(data.decode("ascii", "ignore"))
+            self._ack(len(data) <= 30)  # the keyer takes at most 30 characters
         else:
             self._ack(False)
 
