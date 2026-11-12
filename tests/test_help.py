@@ -97,9 +97,12 @@ def test_generator_imports_and_builders_run_headless():
     assert isinstance(wsjtx, QWidget)
 
 
-def test_embedded_screenshots_exist_after_generation():
+def test_embedded_screenshots_exist_after_generation(tmp_path):
+    # Generate into a temp dir so running the suite doesn't rewrite the committed
+    # PNGs (regenerate those on purpose with scripts/screenshots.py).
     module = _load_screenshots_module()
-    module.generate_all()  # idempotent; regenerates the PNGs
+    module.SHOTS_DIR = tmp_path
+    generated = {path.name for path in module.generate_all()}
 
     referenced: set[str] = set()
     for page in GUIDE_DIR.glob("*.md"):
@@ -108,6 +111,7 @@ def test_embedded_screenshots_exist_after_generation():
             referenced.add(rel)
             resolved = (GUIDE_DIR / rel).resolve()
             assert resolved.is_file(), f"{page.name} references missing image {rel}"
+            assert resolved.name in generated, f"generator doesn't produce {rel}"
     assert referenced, "expected at least one embedded screenshot"
 
 
