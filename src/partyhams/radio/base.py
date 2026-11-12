@@ -55,6 +55,9 @@ class Radio(ABC):
     backend_id: str = ""
     #: Human-readable backend name.
     backend_name: str = ""
+    #: The (min, max) WPM the rig's keyer accepts, if narrower than the logger's
+    #: range; a speed outside it is clamped by the rig. None = no known limit.
+    keyer_wpm_range: tuple[int, int] | None = None
 
     @property
     @abstractmethod

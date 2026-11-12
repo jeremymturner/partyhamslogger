@@ -16,6 +16,7 @@ integration test, but this path has not yet been validated against real hardware
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 import time
 
@@ -32,13 +33,55 @@ from partyhams.radio.civ_protocol import (
 )
 from partyhams.radio.registry import register
 
+log = logging.getLogger(__name__)
+
 _MODEL_NAMES = {
     CIV_ADDR_IC705: "IC-705",
     CIV_ADDR_IC7610: "IC-7610",
     CIV_ADDR_IC7300MK2: "IC-7300 MK2",
 }
 _CONNECT_TIMEOUT = 10.0  # seconds to reach an authenticated, CI-V-open session
+# Renew the login token this often (wfview: TOKEN_RENEWAL 60 s). An IC-7610 silently
+# stops serving a session ~90 s after login if the token is never renewed.
+_TOKEN_RENEW_INTERVAL = 60.0
 _TRANSACT_TIMEOUT = 0.6
+
+
+def verify_reachable(
+    host: str, port: int = proto.DEFAULT_CONTROL_PORT, timeout: float = 2.0
+) -> bool:
+    """True if an Icom rig answers "are you there" on its UDP control port.
+
+    Unauthenticated and side-effect free (a disconnect follows any reply), so it
+    is safe to call from a settings dialog to check the IP/port before logging in.
+    """
+    if not host:
+        return False
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError:
+        return False
+    try:
+        sock.connect((host, port))
+        local_ip, local_port = sock.getsockname()[:2]
+        my_id = proto.make_id(local_ip, local_port)
+        attempts = 4
+        sock.settimeout(timeout / attempts)
+        for _ in range(attempts):
+            sock.send(proto.control(proto.TYPE_AREYOUTHERE, 0, my_id, 0))
+            try:
+                data = sock.recv(2048)
+            except TimeoutError:
+                continue
+            head = proto.parse_header(data)
+            if head is not None and head.type == proto.TYPE_IAMHERE:
+                sock.send(proto.control(proto.TYPE_DISCONNECT, 0, my_id, head.sentid))
+                return True
+        return False
+    except OSError:
+        return False
+    finally:
+        sock.close()
 
 
 class _Stream(asyncio.DatagramProtocol):
@@ -58,7 +101,10 @@ class _Stream(asyncio.DatagramProtocol):
         self.my_id = 0
         self.remote_id = 0
         self.local_port = 0
-        self._send_seq = 0  # common-header seq (LE @0x06), per tracked packet
+        # common-header seq (LE @0x06), per tracked packet. Starts at 1 like wfview:
+        # "are you ready" goes out untracked as seq 1 and the radio drops a first
+        # tracked packet (the login) stamped seq 0, so the session never authenticates.
+        self._send_seq = 1
         self._inner_seq = 0  # CI-V data/openclose sendseq (BE)
         self._ping_seq = 0
         self._tx_buffer: dict[int, bytes] = {}  # seq -> bytes, for retransmit honoring
@@ -133,16 +179,20 @@ class _Stream(asyncio.DatagramProtocol):
             self._handle_retransmit(data)
             return
         # Everything else (auth packets, CI-V data, capabilities) goes to the owner.
+        if self.name == "control":
+            log.debug("control: rx len=0x%02x type=0x%02x", len(data), head.type)
         self.on_packet(data)
 
     def _handle_control(self, head: proto.Header, data: bytes) -> None:
         if head.type == proto.TYPE_IAMHERE:
+            log.debug("%s: I am here (remote id 0x%08x)", self.name, head.sentid)
             self.remote_id = head.sentid
             # Acknowledge with "are you ready" (untracked, seq=1) per the protocol.
             self._send(proto.control(proto.TYPE_READY, 1, self.my_id, self.remote_id))
         elif head.type == proto.TYPE_READY:  # "I am ready"
             self.remote_id = head.sentid
             if not self._ready_fired:
+                log.debug("%s: I am ready", self.name)
                 self._ready_fired = True
                 self._tasks.append(asyncio.ensure_future(self._keepalive_loop()))
                 self.on_ready()
@@ -150,6 +200,8 @@ class _Stream(asyncio.DatagramProtocol):
             resend = self._tx_buffer.get(head.seq)
             if resend is not None:
                 self._send(resend)
+        elif head.type == proto.TYPE_DISCONNECT:
+            log.debug("%s: radio sent disconnect", self.name)
 
     def _handle_ping(self, head: proto.Header, data: bytes) -> None:
         reply = data[0x10]
@@ -178,21 +230,6 @@ class _Stream(asyncio.DatagramProtocol):
             self._ping_seq = (self._ping_seq + 1) & 0xFFFF
             self.send_idle()
             await asyncio.sleep(0.5)
-
-
-def verify_connectivity(host: str, port: int = proto.DEFAULT_CONTROL_PORT,
-                        timeout: float = 2.0) -> bool:
-    """True if the Icom LAN radio at host:port responds to a UDP AreYouThere probe."""
-    pkt = proto.control(proto.TYPE_AREYOUTHERE, 0, 0, 0)
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.settimeout(timeout)
-            sock.sendto(pkt, (host, port))
-            data, _ = sock.recvfrom(256)
-        hdr = proto.parse_header(data)
-        return hdr is not None and hdr.type == proto.TYPE_IAMHERE
-    except OSError:
-        return False
 
 
 @register
@@ -236,6 +273,27 @@ class IcomNet(CivRadio):
         self._civ_buf = b""
         self._civ_rx: asyncio.Queue[bytes] = asyncio.Queue()
         self._open_retry: asyncio.Task | None = None
+        self._renew_task: asyncio.Task | None = None
+        self._lost: str | None = None  # set when the radio drops the session
+
+    def _reset_session(self) -> None:
+        """Clear per-session state so the same instance can reconnect.
+
+        RadioPoller reconnects by calling disconnect() then connect() on this same
+        object; stale events/token/radio choice would otherwise make connect()
+        return immediately without logging in.
+        """
+        self._token = 0
+        self._tokrequest = 0
+        self._inner_auth_seq = 1
+        self._chosen = None
+        self._authed = asyncio.Event()
+        self._civ_open = asyncio.Event()
+        self._auth_error = None
+        self._civ_buf = b""
+        self._civ_rx = asyncio.Queue()
+        self._lost = None
+        self._wpm_misses = 0
 
     def description(self) -> str:
         model = _MODEL_NAMES.get(self.civ_address, "LAN")
@@ -246,6 +304,7 @@ class IcomNet(CivRadio):
     # ------------------------------------------------------------------ #
     async def connect(self) -> None:
         loop = asyncio.get_running_loop()
+        self._reset_session()
         self._local_ip = self._detect_local_ip()
         self._audio_local_port = self._reserve_port()
 
@@ -259,16 +318,26 @@ class IcomNet(CivRadio):
             local_addr=(self._local_ip, 0),
         )
 
+        log.debug(
+            "connect %s:%d from %s (control port %d, civ port %d, audio port %d)",
+            self.host, self.control_port, self._local_ip, self._control.local_port,
+            self._civ.local_port, self._audio_local_port,
+        )
         self._control.start((self.host, self.control_port))
         try:
             # Auth failure also sets _authed (with _auth_error) so we fail fast.
             await asyncio.wait_for(self._authed.wait(), _CONNECT_TIMEOUT)
             if self._auth_error is not None:
-                raise OSError(self._auth_error)
+                raise OSError(f"Icom LAN connect failed: {self._auth_error}")
+            # A refused stream request also sets _civ_open (with _auth_error).
             await asyncio.wait_for(self._civ_open.wait(), _CONNECT_TIMEOUT)
+            if self._auth_error is not None:
+                raise OSError(f"Icom LAN connect failed: {self._auth_error}")
         except TimeoutError as exc:
             await self.disconnect()
             reason = self._auth_error or "no response from radio"
+            log.debug("connect timed out: authed=%s civ_open=%s reason=%s",
+                      self._authed.is_set(), self._civ_open.is_set(), reason)
             raise OSError(f"Icom LAN connect failed: {reason}") from exc
         except OSError:
             await self.disconnect()
@@ -278,6 +347,22 @@ class IcomNet(CivRadio):
         if self._open_retry is not None:
             self._open_retry.cancel()
             self._open_retry = None
+        if self._renew_task is not None:
+            self._renew_task.cancel()
+            self._renew_task = None
+        # Release the session the way wfview does — close the CI-V data flow and
+        # delete our login token before the per-stream "disconnect". Without this
+        # the radio keeps the session reserved and refuses the next connection
+        # (status error 0xFFFFFFFF) until it times the stale one out.
+        if self._civ is not None and self._civ_open.is_set():
+            self._civ.send_openclose(close=True)
+        if self._control is not None and self._token:
+            log.debug("control: deleting token")
+            self._control._send_tracked(
+                proto.token(self._control.my_id, self._control.remote_id, self._next_auth_seq(),
+                            self._tokrequest, self._token, proto.TOKEN_DELETE)
+            )
+            self._token = 0
         for stream in (self._civ, self._control):
             if stream is not None:
                 stream.close()
@@ -312,6 +397,8 @@ class IcomNet(CivRadio):
             self._control.my_id, self._control.remote_id, self._next_auth_seq(),
             self._tokrequest, self.username, self.password, self.client_name,
         )
+        log.debug("control: login sent (user=%r, tokrequest=0x%04x)",
+                  self.username, self._tokrequest)
         self._control._send_tracked(pkt)
 
     def _next_auth_seq(self) -> int:
@@ -326,13 +413,14 @@ class IcomNet(CivRadio):
         elif size == proto.STATUS_SIZE:
             self._on_status(data)
         elif size == proto.TOKEN_SIZE:
-            pass  # token-renewal acks — nothing required for a control-only session
+            self._on_token_response(data)
         elif proto.is_capabilities(data):
             self._on_capabilities(data)
         # Inbound CONNINFO (0x90) packets are informational; ignored.
 
     def _on_login_response(self, data: bytes) -> None:
         resp = proto.parse_login_response(data)
+        log.debug("control: login response %s", {**resp, "token": "…"})
         if resp["error"] == 0xFEFFFFFF:
             self._auth_error = "invalid username/password"
             self._authed.set()  # release connect() so it fails fast
@@ -345,9 +433,33 @@ class IcomNet(CivRadio):
                           self._tokrequest, self._token, proto.TOKEN_CONFIRM)
         self._control._send_tracked(pkt)
         self._authed.set()
+        if self._renew_task is None:
+            self._renew_task = asyncio.ensure_future(self._renew_loop())
+
+    async def _renew_loop(self) -> None:
+        while True:
+            await asyncio.sleep(_TOKEN_RENEW_INTERVAL)
+            if self._control is None or not self._token:
+                return
+            log.debug("control: renewing token")
+            self._control._send_tracked(
+                proto.token(self._control.my_id, self._control.remote_id, self._next_auth_seq(),
+                            self._tokrequest, self._token, proto.TOKEN_RENEW)
+            )
+
+    def _on_token_response(self, data: bytes) -> None:
+        resp = proto.parse_token_response(data)
+        log.debug("control: token response type=0x%02x reply=0x%02x response=0x%08x",
+                  resp["requesttype"], resp["requestreply"], resp["response"])
+        if resp["requesttype"] == proto.TOKEN_RENEW and resp["response"] == 0xFFFFFFFF:
+            # The radio no longer recognises our session; make the next command fail
+            # so RadioPoller disconnects and logs in again.
+            self._lost = "radio rejected token renewal (session expired)"
 
     def _on_capabilities(self, data: bytes) -> None:
         radios = proto.parse_capabilities(data)
+        log.debug("control: capabilities %s",
+                  [(r.name, hex(r.civ_address), r.use_guid) for r in radios])
         if not radios or self._chosen is not None:
             return
         # Prefer the radio matching the configured model; else take the first.
@@ -363,9 +475,14 @@ class IcomNet(CivRadio):
 
     def _on_status(self, data: bytes) -> None:
         st = proto.parse_status(data)
+        log.debug("control: status %s", st)
         if st["error"] == 0xFFFFFFFF:
-            self._auth_error = "connection refused — try rebooting the radio"
+            self._auth_error = (
+                "radio refused the connection — it may still be holding a previous "
+                "session (wait ~1 minute) or another program is connected"
+            )
             self._authed.set()
+            self._civ_open.set()  # release connect() now instead of timing out
             return
         if st["disconnected"] or not st["civ_port"]:
             return
@@ -378,6 +495,7 @@ class IcomNet(CivRadio):
     # ------------------------------------------------------------------ #
     def _on_civ_ready(self) -> None:
         # Ask the radio to start the CI-V data flow; resend until data arrives.
+        log.debug("civ: stream ready, requesting open")
         self._civ.send_openclose(close=False)
         self._open_retry = asyncio.ensure_future(self._resend_open())
         self._civ_open.set()
@@ -399,6 +517,7 @@ class IcomNet(CivRadio):
         frames, self._civ_buf = parse_frames(self._civ_buf)
         for frame in frames:
             if frame.to_addr == CONTROLLER_ADDR and frame.payload:
+                log.debug("civ: rx from=0x%02x payload=%s", frame.from_addr, frame.payload.hex())
                 self._civ_rx.put_nowait(frame.payload)
 
     # ------------------------------------------------------------------ #
@@ -413,6 +532,8 @@ class IcomNet(CivRadio):
     ) -> bytes | None:
         if self._civ is None or self._civ.radio_addr is None:
             raise RadioUnsupported("Icom LAN backend is not connected")
+        if self._lost is not None:
+            raise OSError(self._lost)
         async with self._lock:
             while not self._civ_rx.empty():  # drop stale/unsolicited frames
                 self._civ_rx.get_nowait()
@@ -423,10 +544,12 @@ class IcomNet(CivRadio):
             while True:
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
+                    log.debug("civ: no reply to %s", payload.hex())
                     return None
                 try:
                     reply = await asyncio.wait_for(self._civ_rx.get(), remaining)
                 except TimeoutError:
+                    log.debug("civ: no reply to %s", payload.hex())
                     return None
                 if ack and reply[0] in (0xFB, 0xFA):
                     return reply

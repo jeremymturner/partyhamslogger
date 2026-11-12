@@ -960,6 +960,24 @@ def test_sync_ignores_our_own_send_echo():
     assert w._macros.cw_wpm == 22
 
 
+
+def test_sync_ignores_echo_clamped_by_a_narrower_rig_keyer():
+    """Icom keyers stop at 48 WPM: keying at 55 reads back 48, which is still our echo."""
+    from types import SimpleNamespace
+
+    from partyhams.app.radio import RadioState
+
+    w = _window()
+    w.set_cw_speed_mode("sync")
+    w._macros.cw_wpm = 55
+    w._last_commanded_wpm = 55
+    w._poller = SimpleNamespace(radio=SimpleNamespace(keyer_wpm_range=(6, 48)))
+    w._maybe_follow_radio_wpm(RadioState(freq_hz=14_040_000, mode=Mode.CW, wpm=48))
+    assert w._macros.cw_wpm == 55  # the operator's 55 survives
+    w._maybe_follow_radio_wpm(RadioState(freq_hz=14_040_000, mode=Mode.CW, wpm=30))
+    assert w._macros.cw_wpm == 30  # a real knob change is still followed
+
+
 # --- ADIF export default filename ------------------------------------------ #
 def test_default_adif_path_uses_call_and_park():
     from pathlib import Path

@@ -2569,10 +2569,21 @@ class MainWindow(QMainWindow):
         so our own sends don't get re-adopted as the macro speed."""
         if self._cw_speed_mode != CW_SPEED_SYNC or state.wpm is None:
             return
-        if state.wpm == self._last_commanded_wpm:
+        if state.wpm == self._commanded_wpm_as_rig_reports():
             return  # our own echo, not an operator knob change
         if state.wpm != self._macros.cw_wpm:
             self._set_wpm(state.wpm, source="radio")
+
+    def _commanded_wpm_as_rig_reports(self) -> int | None:
+        """The last speed we commanded, as the rig will read it back: a rig with a
+        narrower keyer range (Icom: 6-48) clamps it, and that clamped echo must not
+        be mistaken for an operator turning the knob."""
+        wpm = self._last_commanded_wpm
+        radio = self._poller.radio if self._poller is not None else None
+        limits = getattr(radio, "keyer_wpm_range", None)
+        if wpm is None or not limits:
+            return wpm
+        return max(limits[0], min(limits[1], wpm))
 
     def _maybe_warn_worked_here(self, state: RadioState) -> None:
         """Search & Pounce convenience (issue #1): on a QSY to a new frequency with
